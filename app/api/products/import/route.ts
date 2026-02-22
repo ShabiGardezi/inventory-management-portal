@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireAnyPermission, createErrorResponse, createSuccessResponse } from '@/lib/rbac';
 import { prisma } from '@/lib/prisma';
 import {
