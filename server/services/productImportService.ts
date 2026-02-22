@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import {
   validateRows,
@@ -122,22 +122,21 @@ async function applyOpeningStock(
 ): Promise<void> {
   const ref = `IMPORT-${Date.now()}`;
   const now = new Date();
+  const movementData: Prisma.StockMovementUncheckedCreateInput = {
+    productId,
+    warehouseId,
+    movementType: 'IN',
+    quantity,
+    referenceType: 'MANUAL',
+    referenceId: ref,
+    referenceNumber: ref,
+    notes: 'Opening stock import',
+    createdById: userId,
+    createdAt: now,
+    updatedAt: now,
+  };
   await prisma.$transaction([
-    prisma.stockMovement.create({
-      data: {
-        productId,
-        warehouseId,
-        movementType: 'IN',
-        quantity,
-        referenceType: 'MANUAL',
-        referenceId: ref,
-        referenceNumber: ref,
-        notes: 'Opening stock import',
-        createdById: userId,
-        createdAt: now,
-        updatedAt: now,
-      },
-    }),
+    prisma.stockMovement.create({ data: movementData }),
     prisma.stockBalance.upsert({
       where: {
         productId_warehouseId: { productId, warehouseId },
@@ -179,8 +178,9 @@ export async function runImport(
 
   const errorRowIndices = new Set(validationErrors.map((e) => e.rowIndex));
 
+  // All-or-nothing with validation errors: failed count must match failedRows length
   if (!options.allowPartial && validationErrors.length > 0) {
-    result.failed = rows.length;
+    result.failed = validationErrors.length;
     result.failedRows = validationErrors.map((e) => ({
       rowIndex: e.rowIndex,
       sku: String(rows[e.rowIndex - 1]?.sku ?? rows[e.rowIndex - 1]?.SKU ?? ''),
@@ -204,27 +204,7 @@ export async function runImport(
     const data = rowToProductData(row);
     if (options.mode === 'upsert' && existingBySku.has(row.sku)) {
       const existing = existingBySku.get(row.sku)!;
-      await prisma.product.update({
-        where: { id: existing.id },
-        data: {
-          name: data.name,
-          description: data.description,
-          category: data.category,
-          unit: data.unit,
-          price: data.price,
-          costPrice: data.costPrice,
-          reorderLevel: data.reorderLevel,
-          isActive: data.isActive,
-        },
-      });
-      return { updated: 1 };
-    }
-    if (options.mode === 'create_only' && existingBySku.has(row.sku)) {
-      return { failed: { errors: ['SKU already exists (create-only mode)'] } };
-    }
-    const product = await prisma.product.create({
-      data: {
-        sku: data.sku,
+      const updateData: Prisma.ProductUncheckedUpdateInput = {
         name: data.name,
         description: data.description,
         category: data.category,
@@ -233,8 +213,28 @@ export async function runImport(
         costPrice: data.costPrice,
         reorderLevel: data.reorderLevel,
         isActive: data.isActive,
-      },
-    });
+      };
+      await prisma.product.update({
+        where: { id: existing.id },
+        data: updateData,
+      });
+      return { updated: 1 };
+    }
+    if (options.mode === 'create_only' && existingBySku.has(row.sku)) {
+      return { failed: { errors: ['SKU already exists (create-only mode)'] } };
+    }
+    const createData: Prisma.ProductUncheckedCreateInput = {
+      sku: data.sku,
+      name: data.name,
+      description: data.description,
+      category: data.category,
+      unit: data.unit,
+      price: data.price,
+      costPrice: data.costPrice,
+      reorderLevel: data.reorderLevel,
+      isActive: data.isActive,
+    };
+    const product = await prisma.product.create({ data: createData });
     let openingQty = row.openingStock ?? 0;
     if (row.warehouseCode && row.openingStock != null && row.openingStock > 0) {
       const wh = await prisma.warehouse.findFirst({
@@ -260,50 +260,49 @@ export async function runImport(
           const data = rowToProductData(row);
           if (options.mode === 'upsert' && existingBySku.has(row.sku)) {
             const existing = existingBySku.get(row.sku)!;
+            const txUpdateData: Prisma.ProductUncheckedUpdateInput = {
+              name: data.name,
+              description: data.description,
+              category: data.category,
+              unit: data.unit,
+              price: data.price,
+              costPrice: data.costPrice,
+              reorderLevel: data.reorderLevel,
+              isActive: data.isActive,
+            };
             await tx.product.update({
               where: { id: existing.id },
-              data: {
-                name: data.name,
-                description: data.description,
-                category: data.category,
-                unit: data.unit,
-                price: data.price,
-                costPrice: data.costPrice,
-                reorderLevel: data.reorderLevel,
-                isActive: data.isActive,
-              },
+              data: txUpdateData,
             });
             result.updated++;
           } else if (options.mode === 'create_only' && existingBySku.has(row.sku)) {
             throw new Error(`SKU ${row.sku} already exists (create-only mode)`);
           } else {
-            const product = await tx.product.create({
-              data: {
-                sku: data.sku,
-                name: data.name,
-                description: data.description,
-                category: data.category,
-                unit: data.unit,
-                price: data.price,
-                costPrice: data.costPrice,
-                reorderLevel: data.reorderLevel,
-                isActive: data.isActive,
-              },
-            });
+            const txCreateData: Prisma.ProductUncheckedCreateInput = {
+              sku: data.sku,
+              name: data.name,
+              description: data.description,
+              category: data.category,
+              unit: data.unit,
+              price: data.price,
+              costPrice: data.costPrice,
+              reorderLevel: data.reorderLevel,
+              isActive: data.isActive,
+            };
+            const product = await tx.product.create({ data: txCreateData });
             result.created++;
             if (row.openingStock != null && row.openingStock > 0 && options.defaultWarehouseId) {
-              await tx.stockMovement.create({
-                data: {
-                  productId: product.id,
-                  warehouseId: options.defaultWarehouseId,
-                  movementType: 'IN',
-                  quantity: row.openingStock,
-                  referenceType: 'MANUAL',
-                  referenceNumber: `IMPORT-${Date.now()}`,
-                  notes: 'Opening stock import',
-                  createdById: userId,
-                },
-              });
+              const txMovementData: Prisma.StockMovementUncheckedCreateInput = {
+                productId: product.id,
+                warehouseId: options.defaultWarehouseId,
+                movementType: 'IN',
+                quantity: row.openingStock,
+                referenceType: 'MANUAL',
+                referenceNumber: `IMPORT-${Date.now()}`,
+                notes: 'Opening stock import',
+                createdById: userId,
+              };
+              await tx.stockMovement.create({ data: txMovementData });
               await tx.stockBalance.upsert({
                 where: {
                   productId_warehouseId: { productId: product.id, warehouseId: options.defaultWarehouseId },

@@ -79,6 +79,20 @@ Example for local PostgreSQL:
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/inventory_db?schema=public"
 ```
 
+For **Supabase** use two URLs (pooler for the app, direct for migrations). Replace `[YOUR-PASSWORD]` with your database password from Supabase → Project Settings → Database:
+
+```env
+# App connections (pooler, port 6543)
+DATABASE_URL="postgresql://postgres.imhdlyufggostpiosoqf:[YOUR-PASSWORD]@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+
+# Migrations: use Session pooler (port 5432) if direct connection is "Not IPv4 compatible" in Supabase
+DIRECT_URL="postgresql://postgres.xxxx:[YOUR-PASSWORD]@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require"
+```
+
+If your Supabase **Direct connection** shows "Not IPv4 compatible", use the **Session pooler** (same pooler host, port 5432) for `DIRECT_URL` instead of `db.xxxx.supabase.co:5432` so migrations work on IPv4 networks.
+
+For **local PostgreSQL only**, set `DIRECT_URL` to the same value as `DATABASE_URL`. Prisma CLI reads `.env` in the project root (not `.env.local`), so put `DATABASE_URL` and `DIRECT_URL` in `.env` for `db:migrate` to work.
+
 Add any NextAuth/oauth vars if you use social login; see app auth config. **Do not commit secrets.**
 
 ### 4. Database
