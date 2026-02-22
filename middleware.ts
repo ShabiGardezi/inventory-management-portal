@@ -9,7 +9,8 @@ export default auth((request: NextAuthRequest) => {
   const { pathname } = request.nextUrl;
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/login', '/api/auth'];
+  // Keep /api/health public so DB connectivity can be checked without auth
+  const publicRoutes = ['/login', '/api/auth', '/api/health'];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
   if (
@@ -51,6 +52,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public files (public folder)
      */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
