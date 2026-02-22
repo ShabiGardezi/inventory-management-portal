@@ -8,6 +8,7 @@ import {
   type RowValidationError,
   type RawImportRow,
 } from '@/server/validators/productImportSchemas';
+import { StockService } from '@/server/services/stock.service';
 
 export type { RawImportRow };
 
@@ -112,7 +113,7 @@ function rowToProductData(row: ProductImportRow): {
   };
 }
 
-/** Create opening stock movement and balance for a product in a warehouse */
+/** Create opening stock movement and balance via StockService (single source of truth). */
 async function applyOpeningStock(
   prisma: PrismaClient,
   productId: string,
@@ -121,43 +122,17 @@ async function applyOpeningStock(
   userId: string | null
 ): Promise<void> {
   const ref = `IMPORT-${Date.now()}`;
-  const now = new Date();
-  const movementData: Prisma.StockMovementUncheckedCreateInput = {
+  const stockService = new StockService(prisma);
+  await stockService.increaseStock({
     productId,
     warehouseId,
-    movementType: 'IN',
     quantity,
     referenceType: 'MANUAL',
     referenceId: ref,
     referenceNumber: ref,
     notes: 'Opening stock import',
-    createdById: userId,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await prisma.$transaction([
-    prisma.stockMovement.create({ data: movementData }),
-    prisma.stockBalance.upsert({
-      where: {
-        productId_warehouseId: { productId, warehouseId },
-      },
-      update: {
-        quantity: { increment: quantity },
-        available: { increment: quantity },
-        lastUpdated: now,
-        updatedAt: now,
-      },
-      create: {
-        productId,
-        warehouseId,
-        quantity,
-        reserved: 0,
-        available: quantity,
-        lastUpdated: now,
-        updatedAt: now,
-      },
-    }),
-  ]);
+    createdById: userId ?? undefined,
+  });
 }
 
 /** Run full import: validate, then create/upsert according to options */
@@ -292,34 +267,15 @@ export async function runImport(
             const product = await tx.product.create({ data: txCreateData });
             result.created++;
             if (row.openingStock != null && row.openingStock > 0 && options.defaultWarehouseId) {
-              const txMovementData: Prisma.StockMovementUncheckedCreateInput = {
+              const stockService = new StockService(tx as unknown as PrismaClient);
+              await stockService.increaseStock({
                 productId: product.id,
                 warehouseId: options.defaultWarehouseId,
-                movementType: 'IN',
                 quantity: row.openingStock,
                 referenceType: 'MANUAL',
                 referenceNumber: `IMPORT-${Date.now()}`,
                 notes: 'Opening stock import',
-                createdById: userId,
-              };
-              await tx.stockMovement.create({ data: txMovementData });
-              await tx.stockBalance.upsert({
-                where: {
-                  productId_warehouseId: { productId: product.id, warehouseId: options.defaultWarehouseId },
-                },
-                update: {
-                  quantity: { increment: row.openingStock },
-                  available: { increment: row.openingStock },
-                  lastUpdated: new Date(),
-                  updatedAt: new Date(),
-                },
-                create: {
-                  productId: product.id,
-                  warehouseId: options.defaultWarehouseId,
-                  quantity: row.openingStock,
-                  reserved: 0,
-                  available: row.openingStock,
-                },
+                createdById: userId ?? undefined,
               });
             }
           }

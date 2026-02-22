@@ -5,6 +5,8 @@ import {
 } from '@/lib/rbac';
 import { getInventoryExport } from '@/server/services/reportService';
 
+export const dynamic = 'force-dynamic';
+
 function toCSV(
   rows: Awaited<ReturnType<typeof getInventoryExport>>
 ): string {

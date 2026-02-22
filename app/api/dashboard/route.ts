@@ -4,6 +4,8 @@ import { createErrorResponse, createSuccessResponse } from '@/lib/rbac';
 import { getDashboardData, type DashboardRange } from '@/server/services/dashboardService';
 import { getFormatSettings } from '@/server/services/settingsService';
 
+export const dynamic = 'force-dynamic';
+
 const VALID_RANGES: DashboardRange[] = ['7d', '30d', '90d', 'custom'];
 
 export async function GET(request: NextRequest) {

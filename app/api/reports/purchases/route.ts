@@ -6,6 +6,8 @@ import {
 } from '@/lib/rbac';
 import { getPurchasesReport } from '@/server/services/reportService';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAnyPermission([

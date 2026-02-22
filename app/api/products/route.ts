@@ -1,13 +1,13 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import {
   requirePermission,
   createErrorResponse,
   createSuccessResponse,
 } from '@/lib/rbac';
 
-const prisma = new PrismaClient();
+export const dynamic = 'force-dynamic';
 
 // Zod schema for product creation
 const createProductSchema = z.object({
@@ -96,32 +96,27 @@ export async function POST(request: NextRequest) {
       },
       201
     );
-  } catch (error: any) {
-    // Handle authentication/permission errors
-    if (error.message === 'Unauthorized: Authentication required') {
-      return createErrorResponse('Unauthorized: Authentication required', 401);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized: Authentication required') {
+        return createErrorResponse('Unauthorized: Authentication required', 401);
+      }
+      if (error.message.includes('Forbidden:')) {
+        return createErrorResponse(error.message, 403);
+      }
     }
-
-    if (error.message.includes('Forbidden:')) {
-      return createErrorResponse(error.message, 403);
-    }
-
-    // Handle Prisma errors
-    if (error.code === 'P2002') {
+    const prismaError = error as { code?: string };
+    if (prismaError.code === 'P2002') {
       return createErrorResponse(
         'A product with this SKU already exists',
         409
       );
     }
-
-    // Handle other errors
     console.error('Error creating product:', error);
     return createErrorResponse(
       'Internal server error: Failed to create product',
       500
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -197,21 +192,19 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(total / limit),
       },
     });
-  } catch (error: any) {
-    if (error.message === 'Unauthorized: Authentication required') {
-      return createErrorResponse('Unauthorized: Authentication required', 401);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized: Authentication required') {
+        return createErrorResponse('Unauthorized: Authentication required', 401);
+      }
+      if (error.message.includes('Forbidden:')) {
+        return createErrorResponse(error.message, 403);
+      }
     }
-
-    if (error.message.includes('Forbidden:')) {
-      return createErrorResponse(error.message, 403);
-    }
-
     console.error('Error fetching products:', error);
     return createErrorResponse(
       'Internal server error: Failed to fetch products',
       500
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

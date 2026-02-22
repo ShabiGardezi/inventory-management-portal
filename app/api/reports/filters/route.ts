@@ -6,6 +6,8 @@ import {
 import { prisma } from '@/lib/prisma';
 import { getDistinctCategories } from '@/server/repositories/reportRepo';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     await requireAnyPermission(['reports.read', 'reports:read']);
