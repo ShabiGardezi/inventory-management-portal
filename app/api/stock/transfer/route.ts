@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 import {
   requirePermission,
@@ -63,6 +64,8 @@ export async function POST(request: NextRequest) {
       allowNegative,
     });
 
+    revalidateTag('dashboard');
+    revalidateTag('stock-movements');
     return createSuccessResponse(result, 201);
   } catch (error) {
     if (error instanceof Error) {

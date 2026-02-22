@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import {
@@ -77,6 +78,8 @@ export async function PATCH(
         ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
     });
+    revalidateTag('products');
+    revalidateTag('dashboard');
     return createSuccessResponse(updated);
   } catch (error) {
     if (error instanceof Error) {
@@ -108,6 +111,8 @@ export async function DELETE(
       where: { id },
       data: { isActive: false },
     });
+    revalidateTag('products');
+    revalidateTag('dashboard');
     return createSuccessResponse({ message: 'Product deleted (archived).' });
   } catch (error) {
     if (error instanceof Error) {

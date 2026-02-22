@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidateTag, unstable_cache } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import {
@@ -7,7 +8,7 @@ import {
   createSuccessResponse,
 } from '@/lib/rbac';
 
-export const dynamic = 'force-dynamic';
+const PRODUCTS_LIST_REVALIDATE_SECONDS = 30;
 
 // Zod schema for product creation
 const createProductSchema = z.object({
@@ -88,7 +89,8 @@ export async function POST(request: NextRequest) {
     //   },
     // });
 
-    // 6. Return success response
+    revalidateTag('products');
+    revalidateTag('dashboard');
     return createSuccessResponse(
       {
         message: 'Product created successfully',
@@ -123,75 +125,81 @@ export async function POST(request: NextRequest) {
 // GET endpoint example (with permission check)
 export async function GET(request: NextRequest) {
   try {
-    // Check authentication and permission
-    const user = await requirePermission('product:read');
+    await requirePermission('product:read');
 
-    // Parse query parameters
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '10', 10);
-    const skip = (page - 1) * limit;
     const search = searchParams.get('search') || '';
-    const category = searchParams.get('category') || undefined;
-    const isActive = searchParams.get('isActive');
+    const category = searchParams.get('category') || '';
+    const isActive = searchParams.get('isActive') ?? '';
     const filterLowStock = searchParams.get('filter') === 'low-stock';
 
-    // Build where clause
-    const where: Record<string, unknown> = {};
+    const getCachedProducts = unstable_cache(
+      async () => {
+        const skip = (page - 1) * limit;
+        const where: Record<string, unknown> = {};
 
-    if (filterLowStock) {
-      const balances = await prisma.stockBalance.groupBy({
-        by: ['productId'],
-        _sum: { available: true },
-      });
-      const lowStockProductIds = balances
-        .filter((b) => {
-          const total = Number(b._sum.available ?? 0);
-          return total < 10 && total >= 0;
-        })
-        .map((b) => b.productId);
-      where.id = { in: lowStockProductIds };
-    }
+        if (filterLowStock) {
+          const balances = await prisma.stockBalance.groupBy({
+            by: ['productId'],
+            _sum: { available: true },
+          });
+          const lowStockProductIds = balances
+            .filter((b) => {
+              const total = Number(b._sum.available ?? 0);
+              return total < 10 && total >= 0;
+            })
+            .map((b) => b.productId);
+          where.id = { in: lowStockProductIds };
+        }
 
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
-    }
+        if (search) {
+          where.OR = [
+            { name: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ];
+        }
 
-    if (category) {
-      where.category = category;
-    }
+        if (category) {
+          where.category = category;
+        }
 
-    // Default to active-only (soft-deleted products excluded) when not specified
-    if (isActive !== null && isActive !== undefined) {
-      where.isActive = isActive === 'true';
-    } else {
-      where.isActive = true;
-    }
+        if (isActive !== null && isActive !== undefined && isActive !== '') {
+          where.isActive = isActive === 'true';
+        } else {
+          where.isActive = true;
+        }
 
-    // Fetch products with pagination
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.product.count({ where }),
-    ]);
+        const [products, total] = await Promise.all([
+          prisma.product.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+          }),
+          prisma.product.count({ where }),
+        ]);
 
-    return createSuccessResponse({
+        return { products, total, page, limit };
+      },
+      ['products', String(page), String(limit), search, category, isActive, String(filterLowStock)],
+      { revalidate: PRODUCTS_LIST_REVALIDATE_SECONDS, tags: ['products'] }
+    );
+
+    const { products, total, page: p, limit: l } = await getCachedProducts();
+    const res = createSuccessResponse({
       products,
       pagination: {
-        page,
-        limit,
+        page: p,
+        limit: l,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(total / l),
       },
     });
+    res.headers.set('Cache-Control', 'private, max-age=20, stale-while-revalidate=40');
+    return res;
   } catch (error: unknown) {
     if (error instanceof Error) {
       if (error.message === 'Unauthorized: Authentication required') {

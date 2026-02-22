@@ -6,7 +6,7 @@ import {
 import { prisma } from '@/lib/prisma';
 import { getDistinctCategories } from '@/server/repositories/reportRepo';
 
-export const dynamic = 'force-dynamic';
+const REPORTS_FILTERS_MAX_AGE = 60;
 
 export async function GET() {
   try {
@@ -19,10 +19,12 @@ export async function GET() {
       }),
       getDistinctCategories(),
     ]);
-    return createSuccessResponse({
+    const res = createSuccessResponse({
       warehouses: warehouses.map((w) => ({ id: w.id, name: w.name, code: w.code })),
       categories,
     });
+    res.headers.set('Cache-Control', `private, max-age=${REPORTS_FILTERS_MAX_AGE}, stale-while-revalidate=120`);
+    return res;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === 'Unauthorized: Authentication required') {

@@ -55,6 +55,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await runImport(prisma, rows, opts, user.id);
+    revalidateTag('products');
+    revalidateTag('dashboard');
     return createSuccessResponse(result, 200);
   } catch (err) {
     if (err instanceof Error) {

@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { hashPassword } from '@/lib/utils/password';
+import { StockService } from '@/server/services/stock.service';
 
 const TEST_PASSWORD = 'TestPassword1!';
 
@@ -74,6 +75,68 @@ export async function createUserWithPermissions(
   };
 }
 
+/**
+ * Create a user with a single role (creates role with given permissions if provided).
+ */
+export async function createUserWithRole(
+  prisma: PrismaClient,
+  roleName: string,
+  permissions: string[] = [],
+  options?: { email?: string; name?: string }
+): Promise<TestUser> {
+  const permRecords = await Promise.all(
+    permissions.map((name) =>
+      prisma.permission.upsert({
+        where: { name },
+        update: { module: 'Test' },
+        create: { name, resource: name.split(':')[0] ?? 'test', action: 'read', module: 'Test' },
+      })
+    )
+  );
+  const role = await prisma.role.upsert({
+    where: { name: roleName },
+    update: {},
+    create: {
+      name: roleName,
+      description: `Test role ${roleName}`,
+      isSystem: false,
+      rolePermissions: {
+        create: permRecords.map((p) => ({ permissionId: p.id })),
+      },
+    },
+    include: { rolePermissions: { include: { permission: true } } },
+  });
+  const email = options?.email ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 9)}@test.local`;
+  const name = options?.name ?? 'Test User';
+  const passwordHash = await hashPassword(TEST_PASSWORD);
+  const user = await prisma.user.create({
+    data: {
+      email,
+      name,
+      passwordHash,
+      isActive: true,
+      userRoles: { create: [{ roleId: role.id }] },
+    },
+    include: {
+      userRoles: {
+        include: {
+          role: { include: { rolePermissions: { include: { permission: true } } } },
+        },
+      },
+    },
+  });
+  const perms = new Set<string>();
+  user.userRoles.forEach((ur) => {
+    ur.role.rolePermissions.forEach((rp) => perms.add(rp.permission.name));
+  });
+  return {
+    id: user.id,
+    email: user.email,
+    permissions: Array.from(perms),
+    roles: user.userRoles.map((ur) => ur.role.name),
+  };
+}
+
 export async function createWarehouse(prisma: PrismaClient, name?: string): Promise<{ id: string; name: string }> {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const w = await prisma.warehouse.create({
@@ -97,6 +160,32 @@ export async function createProduct(prisma: PrismaClient, sku?: string): Promise
     },
   });
   return { id: p.id, sku: p.sku, name: p.name };
+}
+
+/**
+ * Seed stock via StockService.receivePurchase (one IN movement + balance update).
+ * Use for tests that need initial stock before adjust/transfer/sale.
+ */
+export async function seedStock(
+  prisma: PrismaClient,
+  params: {
+    productId: string;
+    warehouseId: string;
+    quantity: number;
+    userId: string;
+    referenceNumber?: string;
+    referenceId?: string;
+  }
+): Promise<void> {
+  const service = new StockService(prisma);
+  await service.receivePurchase({
+    productId: params.productId,
+    warehouseId: params.warehouseId,
+    quantity: params.quantity,
+    referenceNumber: params.referenceNumber ?? `PO-SEED-${Date.now()}`,
+    referenceId: params.referenceId,
+    createdById: params.userId,
+  });
 }
 
 /** Ensure global settings exist (for allowNegativeStock). */

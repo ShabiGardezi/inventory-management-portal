@@ -4,6 +4,7 @@ import {
   createUserWithPermissions,
   createWarehouse,
   createProduct,
+  seedStock,
   ensureSettings,
 } from './helpers/factories';
 import { StockService } from '@/server/services/stock.service';
@@ -132,14 +133,14 @@ describe('StockService integration', () => {
       createProduct(prisma),
       createWarehouse(prisma),
     ]);
-    const service = new StockService(prisma);
-    await service.receivePurchase({
+    await seedStock(prisma, {
       productId: product.id,
       warehouseId: warehouse.id,
       quantity: 40,
+      userId: user.id,
       referenceNumber: 'PO-INIT',
-      createdById: user.id,
     });
+    const service = new StockService(prisma);
     const result = await service.confirmSale({
       productId: product.id,
       warehouseId: warehouse.id,

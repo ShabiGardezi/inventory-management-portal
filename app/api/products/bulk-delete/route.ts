@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import {
@@ -36,6 +37,8 @@ export async function POST(request: NextRequest) {
       return { deletedCount: updated.count };
     });
 
+    revalidateTag('products');
+    revalidateTag('dashboard');
     return createSuccessResponse({
       message: 'Products deleted (archived).',
       deletedCount: result.deletedCount,

@@ -6,7 +6,7 @@ import {
 } from '@/lib/rbac';
 import { getPurchasesReport } from '@/server/services/reportService';
 
-export const dynamic = 'force-dynamic';
+const REPORTS_DATA_MAX_AGE = 20;
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       pageSize: searchParams.get('pageSize') ?? undefined,
     };
     const result = await getPurchasesReport(user, query);
-    return createSuccessResponse({
+    const res = createSuccessResponse({
       totals: result.totals,
       trend: result.trend,
       byWarehouse: result.byWarehouse,
@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(result.total / result.pageSize) || 1,
       },
     });
+    res.headers.set('Cache-Control', `private, max-age=${REPORTS_DATA_MAX_AGE}, stale-while-revalidate=40`);
+    return res;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === 'Unauthorized: Authentication required') {

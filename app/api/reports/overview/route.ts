@@ -6,8 +6,6 @@ import {
 } from '@/lib/rbac';
 import { getReportOverview } from '@/server/services/reportService';
 
-export const dynamic = 'force-dynamic';
-
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAnyPermission(['reports.read', 'reports:read']);
@@ -20,7 +18,9 @@ export async function GET(request: NextRequest) {
       category: searchParams.get('categoryId') ?? undefined,
     };
     const data = await getReportOverview(user, filters);
-    return createSuccessResponse(data);
+    const res = createSuccessResponse(data);
+    res.headers.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
+    return res;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === 'Unauthorized: Authentication required') {

@@ -230,6 +230,7 @@ export async function runImport(
   if (allOrNothing && valid.length > 0) {
     try {
       await prisma.$transaction(async (tx) => {
+        const importBatchRef = 'IMPORT-' + Date.now();
         for (const { row, rowIndex } of valid) {
           if (errorRowIndices.has(rowIndex)) continue;
           const data = rowToProductData(row);
@@ -273,7 +274,7 @@ export async function runImport(
                 warehouseId: options.defaultWarehouseId,
                 quantity: row.openingStock,
                 referenceType: 'MANUAL',
-                referenceNumber: `IMPORT-${Date.now()}`,
+                referenceNumber: `${importBatchRef}-${rowIndex}`,
                 notes: 'Opening stock import',
                 createdById: userId ?? undefined,
               });

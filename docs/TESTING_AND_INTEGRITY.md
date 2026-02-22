@@ -1,5 +1,11 @@
 # Testing and Integrity
 
+## Reusable verify-integrity logic
+
+The integrity checks are implemented in **`lib/verify-integrity.ts`** as `runIntegrityChecks(prisma: PrismaClient)`. Use this in tests to assert ledger/balance consistency after stock operations. The CLI script `scripts/verify-integrity.ts` calls the same function.
+
+---
+
 ## verify-integrity Script
 
 The **verify-integrity** script checks that the stock ledger and balances are consistent and that business rules are respected. Run it after migrations, seeds, or data changes to catch drift or bugs.
@@ -42,11 +48,32 @@ The **verify-integrity** script checks that the stock ledger and balances are co
 
 ## Integration Test Approach
 
-Tests use **Vitest** and a **test database** (separate from dev). The test DB is reset (or migrated) so tests don’t depend on dev data.
+Tests use **Vitest** and a **test database** (separate from dev). The test DB is reset between tests so each test starts from a clean state.
 
-- **Test DB:** Use a dedicated database (e.g. `DATABASE_URL` pointing to `inventory_test` or `postgres` with a test schema).
-- **Reset:** Before or during tests, schema is applied and data is cleared (or seed is run) so each test starts from a known state.
-- **Factories:** Helpers create users, products, warehouses, and users with specific permissions (e.g. `createUserWithPermissions(prisma, ['stock:read'])`).
+### Test DB strategy
+
+- **URL:** Set `DATABASE_URL_TEST` to a dedicated PostgreSQL database (e.g. `inventory_test`). If unset, tests use `DATABASE_URL` (same as dev; avoid in CI).
+- **Schema:** Use the same Prisma schema as dev. Run migrations on the test DB once:
+  ```bash
+  DATABASE_URL_TEST="postgresql://..." DIRECT_URL_TEST="postgresql://..." npx prisma migrate deploy
+  ```
+- **Setup:** `test/setup.ts` runs before tests: it loads `.env` and, when `DATABASE_URL_TEST` is set, overrides `DATABASE_URL` and `DIRECT_URL` so the app singleton (`lib/prisma`) and test helpers use the same test DB.
+
+### DB reset between tests
+
+- **Strategy:** Before each test, `resetTestDb(prisma)` deletes all data in FK-safe order (e.g. audit logs → movements → balances → users/roles → products/warehouses → settings). No schema drop/recreate; tables stay in place.
+- **Helper:** `test/helpers/db.ts` exports `createTestPrisma()` (PrismaClient with test URL) and `resetTestDb(prisma)`.
+
+### Factories (`test/helpers/factories.ts`)
+
+| Factory | Purpose |
+|--------|---------|
+| `createUserWithPermissions(prisma, permissions[], options?)` | User with given permission keys (creates role + permissions if needed). |
+| `createUserWithRole(prisma, roleName, permissions[], options?)` | User with a single role (upserts role with optional permissions). |
+| `createWarehouse(prisma, name?)` | Active warehouse with unique code. |
+| `createProduct(prisma, sku?)` | Active product with unique SKU. |
+| `seedStock(prisma, { productId, warehouseId, quantity, userId, ... })` | One IN movement + balance update via `StockService.receivePurchase`. |
+| `ensureSettings(prisma, allowNegativeStock?)` | Ensure global settings row exists (for integrity checks). |
 
 ---
 
@@ -87,16 +114,20 @@ npm run verify:integrity
 
 **Integration tests (Vitest):**
 ```bash
-npm run test
-# or, if you have a test script that targets integration tests:
-npm run test -- test/stock.integration.test.ts
+npm run test              # watch mode (integration tests only)
+npm run test:integration  # single run, CI-friendly
+npm run test -- test/stock.integration.test.ts   # only stock tests
+npm run test -- test/api/rbac.integration.test.ts # only RBAC API tests
 ```
 
-**Typical CI flow:**
-1. Start or use a test PostgreSQL instance.
-2. Set `DATABASE_URL` to the test DB.
-3. `npm run db:migrate` (or `db:push`) on test DB.
-4. `npm run test` (runs integration tests that use the test DB).
-5. `npm run verify:integrity` (optional; tests already run it after stock mutations).
+**Scripts (package.json):**
+- `test` — Vitest in watch mode; runs all `test/**/*.integration.test.ts`.
+- `test:integration` — Vitest single run (no watch); same pattern.
 
-Ensure `.env.test` or CI env provides a test `DATABASE_URL`; do not run integrity or tests against production without a dedicated test database.
+**Typical CI flow:**
+1. Set `DATABASE_URL_TEST` (and `DIRECT_URL_TEST` if using separate direct URL) to a dedicated test PostgreSQL database.
+2. Run migrations on the test DB once: `DATABASE_URL_TEST=... DIRECT_URL_TEST=... npx prisma migrate deploy`.
+3. Run `npm run test:integration`. Tests reset data between runs and do not depend on seed.
+4. Optionally run `npm run verify:integrity` against the test DB after tests (tests already call `runIntegrityChecks` after stock mutations).
+
+Do not run integration tests or verify-integrity against production.
