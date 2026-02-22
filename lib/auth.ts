@@ -17,27 +17,35 @@ export const authConfig: NextAuthConfig = {
         }
         const email = String(credentials.email);
         const password = String(credentials.password);
-        const user = await prisma.user.findUnique({
-          where: { email },
-          include: {
-            userRoles: {
-              include: {
-                role: {
-                  include: {
-                    rolePermissions: {
-                      include: {
-                        permission: true,
+
+        let user;
+        try {
+          user = await prisma.user.findUnique({
+            where: { email },
+            include: {
+              userRoles: {
+                include: {
+                  role: {
+                    include: {
+                      rolePermissions: {
+                        include: {
+                          permission: true,
+                        },
                       },
                     },
                   },
                 },
               },
             },
-          },
-        });
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[auth] Database error during login:', msg);
+          throw new Error('Database connection failed');
+        }
 
         if (!user || !user.isActive) {
-          throw new Error('Invalid credentials or account is inactive');
+          return null;
         }
 
         const isPasswordValid = await compare(
@@ -46,7 +54,7 @@ export const authConfig: NextAuthConfig = {
         );
 
         if (!isPasswordValid) {
-          throw new Error('Invalid credentials');
+          return null; // NextAuth shows "Invalid email or password" (CredentialsSignin)
         }
 
         // Extract permissions from user roles
@@ -57,7 +65,6 @@ export const authConfig: NextAuthConfig = {
           });
         });
 
-        // Extract role names
         const roles = user.userRoles.map((ur) => ur.role.name);
 
         return {

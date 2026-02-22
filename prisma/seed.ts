@@ -130,7 +130,10 @@ async function printSummary(prisma: PrismaClient): Promise<void> {
   console.log('  Sales orders (refs):', saleRefs);
   console.log('  Audit logs:', auditLogs);
   console.log('\n✨ Seed completed successfully.');
-  console.log('  Test login: admin@example.com / password123');
+  console.log('  Test logins (password123):');
+  console.log('    admin@example.com, manager@example.com, staff@example.com, viewer@example.com');
+  console.log('    inventory_clerk@example.com, warehouse_lead@example.com, procurement@example.com');
+  console.log('    sales_rep@example.com, reports_only@example.com');
 }
 
 async function runSeed(config: SeedConfig): Promise<void> {

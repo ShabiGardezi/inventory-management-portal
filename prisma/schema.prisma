@@ -509,6 +509,10 @@ model Settings {
   valuationMethod  ValuationMethod @default(AVERAGE_COST) // AVERAGE_COST | FIFO
   showFinancials   Boolean         @default(true)         // Permission gating default
 
+  // Reset/seed safety (CLI scripts require one of these true to run)
+  systemLockdown   Boolean         @default(false)        // When true, allows db-reset/db-seed in prod
+  allowProdWipe    Boolean         @default(false)        // When true, allows wipe even with existing users
+
   // Notifications
   lowStockNotificationsEnabled Boolean @default(true)
   dailySummaryEmailEnabled     Boolean @default(false)

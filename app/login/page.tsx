@@ -32,7 +32,10 @@ function LoginForm() {
     if (error === 'Configuration') {
       toast({
         title: 'Configuration Error',
-        description: 'Database connection failed. Please check your DATABASE_URL in .env and ensure the database is running and accessible.',
+        description:
+          process.env.NODE_ENV === 'production'
+            ? 'Database connection failed. Ensure DATABASE_URL and DIRECT_URL are set in your hosting environment (e.g. Vercel Project Settings → Environment Variables) and the database is accessible.'
+            : 'Database connection failed. Please check your DATABASE_URL in .env and ensure the database is running and accessible.',
         variant: 'destructive',
       });
       return;
@@ -88,12 +91,12 @@ function LoginForm() {
             </Button>
           </form>
           <div className="mt-4 text-sm text-muted-foreground">
-            <p className="font-semibold mb-2">Test Accounts:</p>
+            <p className="font-semibold mb-2">Test accounts (password: password123):</p>
             <ul className="space-y-1 text-xs">
-              <li>Admin: admin@example.com / password123</li>
-              <li>Manager: manager@example.com / password123</li>
-              <li>Staff: staff@example.com / password123</li>
-              <li>Viewer: viewer@example.com / password123</li>
+              <li>Admin: admin@example.com</li>
+              <li>Manager: manager@example.com · Staff: staff@example.com · Viewer: viewer@example.com</li>
+              <li>Inventory Clerk: inventory_clerk@example.com · Warehouse Lead: warehouse_lead@example.com</li>
+              <li>Procurement: procurement@example.com · Sales Rep: sales_rep@example.com · Reports: reports_only@example.com</li>
             </ul>
           </div>
         </CardContent>

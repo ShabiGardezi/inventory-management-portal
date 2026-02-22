@@ -27,6 +27,8 @@ export interface SettingsRow {
   enableBarcode: boolean;
   quantityPrecision: string;
   lowStockThresholdBehavior: string;
+  systemLockdown: boolean;
+  allowProdWipe: boolean;
   lowStockNotificationsEnabled: boolean;
   dailySummaryEmailEnabled: boolean;
   weeklySummaryEmailEnabled: boolean;

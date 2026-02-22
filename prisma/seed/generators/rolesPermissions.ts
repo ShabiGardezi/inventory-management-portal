@@ -69,15 +69,15 @@ export interface SeedRolesResult {
 }
 
 export async function seedPermissions(prisma: PrismaClient): Promise<PermissionRecord[]> {
-  const created = await Promise.all(
-    PERMISSIONS.map((p) =>
-      prisma.permission.upsert({
-        where: { name: p.name },
-        update: { module: p.module },
-        create: p,
-      })
-    )
-  );
+  const created: Awaited<ReturnType<PrismaClient['permission']['upsert']>>[] = [];
+  for (const p of PERMISSIONS) {
+    const c = await prisma.permission.upsert({
+      where: { name: p.name },
+      update: { module: p.module },
+      create: p,
+    });
+    created.push(c);
+  }
   return created.map((c) => ({
     id: c.id,
     name: c.name,
