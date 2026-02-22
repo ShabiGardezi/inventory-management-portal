@@ -1,0 +1,319 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// RBAC Models
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  isActive      Boolean   @default(true)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  userRoles      UserRole[]
+  userSettings   UserSettings?
+  auditLogs      AuditLog[]
+  stockMovements StockMovement[] @relation("StockMovementCreator")
+
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Role {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isSystem    Boolean   @default(false) // Admin, Manager, Staff, Viewer are system roles
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@index([name])
+  @@index([isActive])
+  @@map("roles")
+}
+
+model Permission {
+  id          String    @id @default(cuid())
+  name        String    @unique // permission key e.g. "roles.read", "roles.manage"
+  resource    String    // e.g., "product", "warehouse", "stock"
+  action      String    // e.g., "create", "read", "update", "delete"
+  module      String?   // UI grouping: Dashboard, Products, Roles, etc.
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  rolePermissions RolePermission[]
+
+  @@index([name])
+  @@index([resource, action])
+  @@index([module])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================
+// Inventory Models
+// ============================================
+
+model Product {
+  id           String    @id @default(cuid())
+  sku          String    @unique
+  name         String
+  description  String?
+  category     String?
+  unit         String    @default("pcs") // e.g., "pcs", "kg", "liters"
+  price        Decimal?  @db.Decimal(10, 2)
+  costPrice    Decimal?  @db.Decimal(10, 2) // For stock value calculation
+  reorderLevel Int?      // Low stock threshold
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  stockMovements StockMovement[]
+  stockBalances  StockBalance[]
+
+  @@index([sku])
+  @@index([name])
+  @@index([category])
+  @@index([isActive])
+  @@map("products")
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  code      String?  @unique // Optional business code
+  name      String
+  address   String?
+  city      String?
+  country   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  stockMovements StockMovement[]
+  stockBalances  StockBalance[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("warehouses")
+}
+
+enum StockMovementType {
+  IN          // Stock in (purchase, return, adjustment)
+  OUT         // Stock out (sale, transfer, adjustment)
+  TRANSFER    // Transfer between warehouses
+  ADJUSTMENT  // Manual adjustment
+}
+
+enum StockMovementReferenceType {
+  PURCHASE
+  SALE
+  TRANSFER
+  ADJUSTMENT
+  MANUAL
+}
+
+model StockMovement {
+  id              String                     @id @default(cuid())
+  productId       String
+  warehouseId     String
+  movementType    StockMovementType
+  quantity        Decimal                    @db.Decimal(10, 2) // Always positive; direction from type
+  referenceType   StockMovementReferenceType? // PURCHASE | SALE | TRANSFER | ADJUSTMENT | MANUAL
+  referenceId     String?                    // ID of related sale/purchase/transfer record
+  referenceNumber String?                    // e.g., PO number, SO number, Transfer ID (display)
+  notes           String?
+  createdById     String?                    // User who created the movement
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  // Relations
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy User?     @relation("StockMovementCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@index([referenceNumber])
+  @@index([createdById])
+  @@index([warehouseId, createdAt])
+  @@index([productId, createdAt])
+  @@index([movementType, createdAt])
+  @@map("stock_movements")
+}
+
+model StockBalance {
+  id          String   @id @default(cuid())
+  productId   String
+  warehouseId String
+  quantity    Decimal  @db.Decimal(10, 2) @default(0)
+  reserved    Decimal  @db.Decimal(10, 2) @default(0) // Reserved for orders
+  available   Decimal  @db.Decimal(10, 2) @default(0) // Available = quantity - reserved
+  lastUpdated DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([available])
+  @@map("stock_balances")
+}
+
+// ============================================
+// Settings (single-tenant: scope GLOBAL)
+// ============================================
+
+model Settings {
+  id        String   @id @default(cuid())
+  scope     String   @default("GLOBAL") // GLOBAL | TENANT (tenantId null for global)
+  tenantId  String?  // null = single-tenant / global
+
+  // Organization
+  companyName       String?
+  businessEmail     String?
+  phone             String?
+  address           String?
+  timezone          String   @default("UTC")
+  currency          String   @default("USD")
+  dateFormat        String   @default("MM/dd/yyyy")
+  invoicePrefix     String?
+  invoiceNumberPattern String?
+  defaultTaxRate    Decimal? @db.Decimal(5, 2)
+
+  // Inventory rules
+  allowNegativeStock         Boolean @default(false)
+  enforceReorderLevelAlerts  Boolean @default(true)
+  defaultWarehouseId         String?
+  stockAdjustmentReasons     String[] @default([]) // configurable reasons
+  enableBarcode              Boolean @default(false)
+  quantityPrecision          String  @default("integer") // "integer" | "decimal"
+  lowStockThresholdBehavior  String  @default("reorderLevel") // "reorderLevel" | "globalThreshold"
+
+  // Notifications
+  lowStockNotificationsEnabled Boolean @default(true)
+  dailySummaryEmailEnabled     Boolean @default(false)
+  weeklySummaryEmailEnabled    Boolean @default(false)
+  notificationRecipientEmails  String[] @default([])
+  inAppNotificationsEnabled   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, tenantId])
+  @@index([scope, tenantId])
+  @@map("settings")
+}
+
+model UserSettings {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  theme      String?  @default("system") // light | dark | system
+  tablePageSize Int?  @default(10)
+  preferences Json?   // extensible: { key: value }
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("user_settings")
+}
+
+// ============================================
+// Audit
+// ============================================
+
+enum AuditLogAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  LOGIN
+  LOGOUT
+  PERMISSION_DENIED
+}
+
+model AuditLog {
+  id          String          @id @default(cuid())
+  userId      String?
+  action      AuditLogAction
+  resource    String          // e.g., "product", "warehouse", "stock_movement"
+  resourceId  String?         // ID of the affected resource
+  description String?
+  metadata    Json?           // Additional data as JSON
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime        @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
