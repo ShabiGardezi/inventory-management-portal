@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 
 const editProductSchema = z.object({
@@ -25,6 +26,8 @@ const editProductSchema = z.object({
   price: z.number().positive().optional().nullable(),
   reorderLevel: z.number().int().min(0, 'Must be 0 or more').optional().nullable(),
   isActive: z.boolean(),
+  trackBatches: z.boolean(),
+  trackSerials: z.boolean(),
 });
 
 type EditProductFormData = z.infer<typeof editProductSchema>;
@@ -39,6 +42,8 @@ export interface ProductForEdit {
   price: number | null;
   reorderLevel: number | null;
   isActive: boolean;
+  trackBatches: boolean;
+  trackSerials: boolean;
 }
 
 interface EditProductDialogProps {
@@ -56,6 +61,8 @@ export function EditProductDialog({ product, open, onOpenChange, onSuccess }: Ed
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<EditProductFormData>({
     resolver: zodResolver(editProductSchema) as Resolver<EditProductFormData>,
@@ -67,6 +74,8 @@ export function EditProductDialog({ product, open, onOpenChange, onSuccess }: Ed
       price: null,
       reorderLevel: null,
       isActive: true,
+      trackBatches: false,
+      trackSerials: false,
     },
   });
 
@@ -80,6 +89,8 @@ export function EditProductDialog({ product, open, onOpenChange, onSuccess }: Ed
         price: product.price != null ? Number(product.price) : null,
         reorderLevel: product.reorderLevel ?? null,
         isActive: product.isActive,
+        trackBatches: product.trackBatches ?? false,
+        trackSerials: product.trackSerials ?? false,
       });
     }
   }, [product, open, reset]);
@@ -99,6 +110,8 @@ export function EditProductDialog({ product, open, onOpenChange, onSuccess }: Ed
           price: data.price,
           reorderLevel: data.reorderLevel ?? null,
           isActive: data.isActive,
+          trackBatches: data.trackBatches,
+          trackSerials: data.trackSerials,
         }),
       });
       if (!res.ok) {
@@ -177,6 +190,27 @@ export function EditProductDialog({ product, open, onOpenChange, onSuccess }: Ed
           <div className="flex items-center gap-2">
             <input type="checkbox" id="edit-isActive" {...register('isActive')} className="rounded" />
             <Label htmlFor="edit-isActive">Active</Label>
+          </div>
+          <div className="space-y-3 border-t pt-4">
+            <Label>Tracking</Label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={watch('trackBatches')}
+                  onCheckedChange={(checked) => setValue('trackBatches', !!checked)}
+                />
+                <span>Track Batches</span>
+              </label>
+              <p className="text-xs text-muted-foreground pl-6">Expiry / lot tracking per batch</p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={watch('trackSerials')}
+                  onCheckedChange={(checked) => setValue('trackSerials', !!checked)}
+                />
+                <span>Track Serials</span>
+              </label>
+              <p className="text-xs text-muted-foreground pl-6">Unique serial number per unit</p>
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>

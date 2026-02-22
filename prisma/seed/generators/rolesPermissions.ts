@@ -50,6 +50,9 @@ const PERMISSIONS: Array<{
   { name: 'purchase.read', resource: 'purchase', action: 'read', description: 'View purchase reports', module: 'Purchases' },
   { name: 'sales.read', resource: 'sales', action: 'read', description: 'View sales reports', module: 'Sales' },
   { name: 'export.read', resource: 'export', action: 'read', description: 'Export reports to CSV', module: 'Reports' },
+  { name: 'approvals.read', resource: 'approvals', action: 'read', description: 'View approval requests', module: 'Approvals' },
+  { name: 'approvals.review', resource: 'approvals', action: 'review', description: 'Approve or reject approval requests', module: 'Approvals' },
+  { name: 'approvals.manage', resource: 'approvals', action: 'manage', description: 'Manage approval policies and cancel requests', module: 'Approvals' },
 ];
 
 export interface PermissionRecord {
@@ -144,7 +147,7 @@ export async function seedRoles(
   // Manager: product, warehouse, stock, inventory, reports, purchase, sales, export, audit, users, roles, settings
   const managerResources = [
     'product', 'warehouse', 'stock', 'inventory', 'reports', 'purchase', 'sales', 'export',
-    'audit', 'users', 'roles', 'settings', 'warehouse',
+    'audit', 'users', 'roles', 'settings', 'warehouse', 'approvals',
   ];
   const managerRole = roles.find((r) => r.name === 'manager')!;
   const managerPerms = permissions.filter(

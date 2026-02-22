@@ -32,6 +32,47 @@ async function mockSession(user: { id: string; email: string; name: string | nul
   });
 }
 
+describe('RBAC API 401', () => {
+  it('POST /api/stock/adjust returns 401 when unauthenticated', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValue(null);
+
+    const { POST } = await import('@/app/api/stock/adjust/route');
+    const req = new NextRequest('http://localhost/api/stock/adjust', {
+      method: 'POST',
+      body: JSON.stringify({
+        productId: 'pid',
+        warehouseId: 'wid',
+        method: 'increase',
+        quantity: 1,
+        reason: 'correction',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/stock/transfer returns 401 when unauthenticated', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValue(null);
+
+    const { POST } = await import('@/app/api/stock/transfer/route');
+    const req = new NextRequest('http://localhost/api/stock/transfer', {
+      method: 'POST',
+      body: JSON.stringify({
+        productId: 'pid',
+        fromWarehouseId: 'w1',
+        toWarehouseId: 'w2',
+        quantity: 1,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('RBAC API 403', () => {
   it('POST /api/stock/adjust returns 403 when user lacks stock:adjust', async () => {
     const [user, product, warehouse] = await Promise.all([

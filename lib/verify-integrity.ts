@@ -1,9 +1,15 @@
 /**
  * Integrity verification for stock ledger and balances.
  * Used by scripts/verify-integrity.ts and integration tests.
+ *
+ * Grouping: (productId, warehouseId, batchId). Each balance row is keyed by
+ * (productId, warehouseId, batchId); movements with matching batchId contribute
+ * to that key's ledger sum. If the database does not yet have batchId columns
+ * (migrations not applied), falls back to (productId, warehouseId) grouping.
  */
 
 import type { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 const DECIMAL_TOLERANCE = 0.001;
 
@@ -11,10 +17,89 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function balanceKey(productId: string, warehouseId: string, batchId: string | null): string {
+  return `${productId}:${warehouseId}:${batchId ?? 'null'}`;
+}
+
 function signedQuantity(movementType: string, quantity: number): number {
   if (movementType === 'IN') return quantity;
   if (movementType === 'OUT') return -quantity;
   return 0;
+}
+
+interface BalanceRow {
+  productId: string;
+  warehouseId: string;
+  batchId: string | null;
+  quantity: number;
+}
+
+interface MovementRow {
+  productId: string;
+  warehouseId: string;
+  batchId: string | null;
+  movementType: string;
+  quantity: number;
+}
+
+async function fetchBalancesAndMovements(
+  prisma: PrismaClient
+): Promise<{ balances: BalanceRow[]; movements: MovementRow[] }> {
+  try {
+    const [balances, movements] = await Promise.all([
+      prisma.stockBalance.findMany({
+        select: { productId: true, warehouseId: true, batchId: true, quantity: true },
+      }),
+      prisma.stockMovement.findMany({
+        select: { productId: true, warehouseId: true, batchId: true, movementType: true, quantity: true },
+      }),
+    ]);
+    return {
+      balances: balances.map((b) => ({
+        productId: b.productId,
+        warehouseId: b.warehouseId,
+        batchId: b.batchId,
+        quantity: Number(b.quantity),
+      })),
+      movements: movements.map((m) => ({
+        productId: m.productId,
+        warehouseId: m.warehouseId,
+        batchId: m.batchId,
+        movementType: m.movementType,
+        quantity: Number(m.quantity),
+      })),
+    };
+  } catch (err) {
+    const isBatchIdMissing =
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2022' &&
+      String((err.meta as { column?: string } | null)?.column ?? '').includes('batchId');
+    if (!isBatchIdMissing) throw err;
+
+    const [balancesRaw, movementsRaw] = await Promise.all([
+      prisma.$queryRaw<Array<{ productId: string; warehouseId: string; quantity: unknown }>>(
+        Prisma.sql`SELECT "productId", "warehouseId", quantity FROM stock_balances`
+      ),
+      prisma.$queryRaw<Array<{ productId: string; warehouseId: string; movementType: string; quantity: unknown }>>(
+        Prisma.sql`SELECT "productId", "warehouseId", "movementType", quantity FROM stock_movements`
+      ),
+    ]);
+    return {
+      balances: balancesRaw.map((b) => ({
+        productId: b.productId,
+        warehouseId: b.warehouseId,
+        batchId: null as string | null,
+        quantity: Number(b.quantity),
+      })),
+      movements: movementsRaw.map((m) => ({
+        productId: m.productId,
+        warehouseId: m.warehouseId,
+        batchId: null as string | null,
+        movementType: m.movementType,
+        quantity: Number(m.quantity),
+      })),
+    };
+  }
 }
 
 export interface IntegrityResult {
@@ -25,30 +110,24 @@ export interface IntegrityResult {
 export async function runIntegrityChecks(prisma: PrismaClient): Promise<IntegrityResult> {
   const errors: string[] = [];
 
-  const balances = await prisma.stockBalance.findMany({
-    select: { productId: true, warehouseId: true, quantity: true },
-  });
-  const movements = await prisma.stockMovement.findMany({
-    select: { productId: true, warehouseId: true, movementType: true, quantity: true },
-  });
+  const { balances, movements } = await fetchBalancesAndMovements(prisma);
 
   const ledgerByKey = new Map<string, number>();
   for (const m of movements) {
-    const key = `${m.productId}:${m.warehouseId}`;
-    const q = Number(m.quantity);
-    const signed = signedQuantity(m.movementType, q);
+    const key = balanceKey(m.productId, m.warehouseId, m.batchId);
+    const signed = signedQuantity(m.movementType, m.quantity);
     ledgerByKey.set(key, (ledgerByKey.get(key) ?? 0) + signed);
   }
 
   for (const b of balances) {
-    const key = `${b.productId}:${b.warehouseId}`;
-    const balanceQty = Number(b.quantity);
-    const ledgerSum = round2(ledgerByKey.get(key) ?? 0);
-    const balanceRounded = round2(balanceQty);
-    if (Math.abs(balanceRounded - ledgerSum) > DECIMAL_TOLERANCE) {
+    const key = balanceKey(b.productId, b.warehouseId, b.batchId);
+    const actual = b.quantity;
+    const expected = round2(ledgerByKey.get(key) ?? 0);
+    const actualRounded = round2(actual);
+    if (Math.abs(actualRounded - expected) > DECIMAL_TOLERANCE) {
       errors.push(
-        `Balance mismatch (productId=${b.productId}, warehouseId=${b.warehouseId}): ` +
-          `stock_balance.quantity=${balanceQty} != SUM(movements)=${ledgerSum}`
+        `Balance mismatch (productId=${b.productId}, warehouseId=${b.warehouseId}, batchId=${b.batchId ?? 'null'}): ` +
+          `expected=${expected} (SUM movements), actual=${actual} (stock_balances.quantity)`
       );
     }
   }
@@ -72,57 +151,31 @@ export async function runIntegrityChecks(prisma: PrismaClient): Promise<Integrit
     byRefId.get(refId)!.push(m);
   }
 
-  const idToMovement = new Map(transferMovements.map((m) => [m.id, m]));
-
   for (const [refId, list] of byRefId) {
-    if (list.length === 2) {
-      const [a, b] = list;
-      const qA = Number(a.quantity);
-      const qB = Number(b.quantity);
-      const oneIn = a.movementType === 'IN' && b.movementType === 'OUT';
-      const oneOut = a.movementType === 'OUT' && b.movementType === 'IN';
-      if (!(oneIn || oneOut)) {
-        errors.push(
-          `Transfer referenceId=${refId}: expected one IN and one OUT, got ${a.movementType} and ${b.movementType}`
-        );
-      }
-      if (Math.abs(qA - qB) > DECIMAL_TOLERANCE) {
-        errors.push(`Transfer referenceId=${refId}: quantities must match, got ${qA} and ${qB}`);
-      }
-      if (a.productId !== b.productId) {
-        errors.push(
-          `Transfer referenceId=${refId}: productId must match, got ${a.productId} and ${b.productId}`
-        );
-      }
+    if (list.length !== 2) {
+      errors.push(
+        `Transfer referenceId=${refId}: expected exactly 2 movement rows (+qty and -qty), got ${list.length}`
+      );
       continue;
     }
-    if (list.length === 1) {
-      const m = list[0]!;
-      if (m.referenceId === null && m.movementType === 'OUT') {
-        const inLeg = transferMovements.find(
-          (x) =>
-            x.referenceId === m.id &&
-            x.movementType === 'IN' &&
-            x.productId === m.productId &&
-            Math.abs(Number(x.quantity) - Number(m.quantity)) <= DECIMAL_TOLERANCE
-        );
-        if (inLeg) continue;
-      }
-      if (m.referenceId != null && m.movementType === 'IN') {
-        const outLeg = idToMovement.get(m.referenceId);
-        if (
-          outLeg &&
-          outLeg.movementType === 'OUT' &&
-          outLeg.productId === m.productId &&
-          Math.abs(Number(outLeg.quantity) - Number(m.quantity)) <= DECIMAL_TOLERANCE
-        ) {
-          continue;
-        }
-      }
+    const [a, b] = list;
+    const qA = Number(a.quantity);
+    const qB = Number(b.quantity);
+    const oneIn = a.movementType === 'IN' && b.movementType === 'OUT';
+    const oneOut = a.movementType === 'OUT' && b.movementType === 'IN';
+    if (!(oneIn || oneOut)) {
+      errors.push(
+        `Transfer referenceId=${refId}: expected one IN (+qty) and one OUT (-qty), got ${a.movementType} and ${b.movementType}`
+      );
     }
-    errors.push(
-      `Transfer referenceId=${refId}: expected exactly 2 movements (or legacy pair), got ${list.length}`
-    );
+    if (Math.abs(qA - qB) > DECIMAL_TOLERANCE) {
+      errors.push(`Transfer referenceId=${refId}: quantities must match, got ${qA} and ${qB}`);
+    }
+    if (a.productId !== b.productId) {
+      errors.push(
+        `Transfer referenceId=${refId}: productId must match, got ${a.productId} and ${b.productId}`
+      );
+    }
   }
 
   const settings = await prisma.settings.findFirst({
@@ -135,7 +188,7 @@ export async function runIntegrityChecks(prisma: PrismaClient): Promise<Integrit
       const q = Number(b.quantity);
       if (q < -DECIMAL_TOLERANCE) {
         errors.push(
-          `Negative balance (productId=${b.productId}, warehouseId=${b.warehouseId}): quantity=${q} but allowNegativeStock=false`
+          `Negative balance (productId=${b.productId}, warehouseId=${b.warehouseId}, batchId=${b.batchId ?? 'null'}): quantity=${q} but allowNegativeStock=false`
         );
       }
     }

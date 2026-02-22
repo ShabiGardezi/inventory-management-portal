@@ -10,11 +10,13 @@ export class StockRepository {
   constructor(private prisma: PrismaClient | PrismaTransactionClient) {}
 
   /**
-   * Get or create stock balance for a product in a warehouse
+   * Get or create stock balance for a product in a warehouse (non-batch when batchId omitted).
+   * For batch-tracked products pass batchId.
    */
   async getOrCreateStockBalance(
     productId: string,
-    warehouseId: string
+    warehouseId: string,
+    batchId?: string | null
   ): Promise<{
     id: string;
     productId: string;
@@ -23,17 +25,32 @@ export class StockRepository {
     reserved: Decimal;
     available: Decimal;
   }> {
-    return this.prisma.stockBalance.upsert({
-      where: {
-        productId_warehouseId: {
+    const bid = batchId ?? null;
+    if (bid !== null) {
+      return this.prisma.stockBalance.upsert({
+        where: {
+          productId_warehouseId_batchId: { productId, warehouseId, batchId: bid },
+        },
+        update: {},
+        create: {
           productId,
           warehouseId,
+          batchId: bid,
+          quantity: 0,
+          reserved: 0,
+          available: 0,
         },
-      },
-      update: {},
-      create: {
+      });
+    }
+    const existing = await this.prisma.stockBalance.findFirst({
+      where: { productId, warehouseId, batchId: null },
+    });
+    if (existing) return existing;
+    return this.prisma.stockBalance.create({
+      data: {
         productId,
         warehouseId,
+        batchId: null,
         quantity: 0,
         reserved: 0,
         available: 0,
@@ -42,11 +59,12 @@ export class StockRepository {
   }
 
   /**
-   * Get stock balance for a product in a warehouse
+   * Get stock balance for a product in a warehouse (non-batch when batchId omitted).
    */
   async getStockBalance(
     productId: string,
-    warehouseId: string
+    warehouseId: string,
+    batchId?: string | null
   ): Promise<{
     id: string;
     productId: string;
@@ -55,24 +73,28 @@ export class StockRepository {
     reserved: Decimal;
     available: Decimal;
   } | null> {
-    return this.prisma.stockBalance.findUnique({
-      where: {
-        productId_warehouseId: {
-          productId,
-          warehouseId,
+    const bid = batchId ?? null;
+    if (bid !== null) {
+      return this.prisma.stockBalance.findUnique({
+        where: {
+          productId_warehouseId_batchId: { productId, warehouseId, batchId: bid },
         },
-      },
+      });
+    }
+    return this.prisma.stockBalance.findFirst({
+      where: { productId, warehouseId, batchId: null },
     });
   }
 
   /**
-   * Update stock balance quantity
+   * Update stock balance quantity (non-batch when batchId omitted).
    */
   async updateStockBalance(
     productId: string,
     warehouseId: string,
     newQuantity: Decimal,
-    newReserved: Decimal | null = null
+    newReserved: Decimal | null = null,
+    batchId?: string | null
   ): Promise<{
     id: string;
     productId: string;
@@ -81,7 +103,7 @@ export class StockRepository {
     reserved: Decimal;
     available: Decimal;
   }> {
-    const balance = await this.getOrCreateStockBalance(productId, warehouseId);
+    const balance = await this.getOrCreateStockBalance(productId, warehouseId, batchId);
     const reserved = newReserved !== null ? newReserved : balance.reserved;
     const available = new Decimal(newQuantity).minus(new Decimal(reserved));
 
@@ -99,7 +121,8 @@ export class StockRepository {
   }
 
   /**
-   * Create stock movement (immutable ledger entry; never update/delete)
+   * Create stock movement (immutable ledger entry; never update/delete).
+   * Always set createdById (performedByUserId) when a user performs the action; createdAt is set by DB.
    */
   async createStockMovement(
     data: {
@@ -112,6 +135,8 @@ export class StockRepository {
       referenceNumber?: string | null;
       notes?: string | null;
       createdById?: string | null;
+      batchId?: string | null;
+      serialCount?: number | null;
     }
   ): Promise<{
     id: string;
@@ -131,6 +156,8 @@ export class StockRepository {
         referenceNumber: data.referenceNumber,
         notes: data.notes,
         createdById: data.createdById,
+        batchId: data.batchId ?? undefined,
+        serialCount: data.serialCount ?? undefined,
       },
     });
   }
@@ -189,5 +216,19 @@ export class StockRepository {
       select: { id: true },
     });
     return !!warehouse;
+  }
+
+  /**
+   * Get product tracking flags (for batch/serial validation).
+   */
+  async getProductTrackingFlags(productId: string): Promise<{
+    trackBatches: boolean;
+    trackSerials: boolean;
+  } | null> {
+    const p = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { trackBatches: true, trackSerials: true },
+    });
+    return p ?? null;
   }
 }

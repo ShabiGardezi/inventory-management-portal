@@ -47,6 +47,7 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -65,6 +66,9 @@ interface MovementRow {
   product: { id: string; name: string; sku: string };
   warehouse: { id: string; name: string; code: string | null };
   createdBy: { id: string; name: string | null; email: string } | null;
+  batch?: { id: string; batchNumber: string; expiryDate?: string } | null;
+  serialCount?: number | null;
+  productSerials?: { serialNumber: string }[];
 }
 
 interface MovementsResponse {
@@ -138,6 +142,7 @@ function StockMovementsContent() {
   const canTransfer = permissions.includes('stock:transfer');
   const canExport = permissions.includes('reports:read') || permissions.includes('inventory:read');
   const canWarehouseRead = permissions.includes('warehouse:read');
+  const canReadApprovals = permissions.includes('approvals.read') || permissions.includes('approvals.review');
 
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -161,6 +166,7 @@ function StockMovementsContent() {
   const [drawerMovement, setDrawerMovement] = useState<MovementRow | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
 
   const movementIdFromUrl = searchParams.get('movementId');
 
@@ -228,6 +234,14 @@ function StockMovementsContent() {
         .catch(() => {});
     }
   }, [canWarehouseRead]);
+
+  useEffect(() => {
+    if (!canReadApprovals) return;
+    fetch('/api/approvals?status=PENDING&page=1&pageSize=1')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.pagination?.total != null) setPendingApprovalCount(d.pagination.total); })
+      .catch(() => {});
+  }, [canReadApprovals, adjustOpen, transferOpen]);
 
   const handleExport = useCallback(async () => {
     if (!canExport) return;
@@ -344,6 +358,22 @@ function StockMovementsContent() {
         ),
       },
       {
+        id: 'batch',
+        header: 'Batch',
+        cell: ({ row }) => {
+          const b = row.original.batch;
+          return b ? <span className="font-mono text-xs">{b.batchNumber}</span> : <span className="text-muted-foreground">—</span>;
+        },
+      },
+      {
+        id: 'serialCount',
+        header: 'Serials',
+        cell: ({ row }) => {
+          const n = row.original.serialCount;
+          return n != null ? n : <span className="text-muted-foreground">—</span>;
+        },
+      },
+      {
         id: 'reference',
         header: 'Reference',
         cell: ({ row }) => {
@@ -409,6 +439,20 @@ function StockMovementsContent() {
 
   return (
     <div className="space-y-6">
+      {pendingApprovalCount != null && pendingApprovalCount > 0 && (
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+            <p className="text-sm font-medium">Awaiting approval: {pendingApprovalCount} request(s) pending review (adjustments / transfers).</p>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/approvals">
+                <ClipboardCheck className="mr-2 h-4 w-4" />
+                Review approvals
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Stock Movements</h1>
@@ -626,10 +670,12 @@ function StockMovementsContent() {
       <AdjustStockModal
         open={adjustOpen}
         onClose={() => setAdjustOpen(false)}
-        onSuccess={() => {
+        onSuccess={(opts) => {
           setAdjustOpen(false);
           fetchMovements();
-          toast({ title: 'Stock adjusted', description: 'The adjustment has been recorded.' });
+          if (!opts?.pendingApproval) {
+            toast({ title: 'Stock adjusted', description: 'The adjustment has been recorded.' });
+          }
         }}
         warehouses={warehouses}
       />
@@ -637,10 +683,12 @@ function StockMovementsContent() {
       <TransferStockModal
         open={transferOpen}
         onClose={() => setTransferOpen(false)}
-        onSuccess={() => {
+        onSuccess={(opts) => {
           setTransferOpen(false);
           fetchMovements();
-          toast({ title: 'Stock transferred', description: 'Transfer completed successfully.' });
+          if (!opts?.pendingApproval) {
+            toast({ title: 'Stock transferred', description: 'Transfer completed successfully.' });
+          }
         }}
         warehouses={warehouses}
       />
@@ -683,6 +731,30 @@ function MovementDetailDrawer({
             <div><span className="font-medium text-muted-foreground">Product</span><br /><Link href={`/dashboard/products/${movement.productId}`} className="text-primary hover:underline">{movement.product.name} ({movement.product.sku})</Link></div>
             <div><span className="font-medium text-muted-foreground">Warehouse</span><br /><Link href={`/dashboard/warehouses/${movement.warehouseId}`} className="text-primary hover:underline">{movement.warehouse.name}</Link></div>
             <div><span className="font-medium text-muted-foreground">Quantity</span><br />{formatQty(movement.movementType, movement.quantity)}</div>
+            {movement.batch && (
+              <div>
+                <span className="font-medium text-muted-foreground">Batch</span><br />
+                <span className="font-mono">{movement.batch.batchNumber}</span>
+                {movement.batch.expiryDate && <span className="text-muted-foreground ml-2">(exp: {movement.batch.expiryDate})</span>}
+              </div>
+            )}
+            {movement.serialCount != null && movement.serialCount > 0 && (
+              <div>
+                <span className="font-medium text-muted-foreground">Serials</span><br />
+                {movement.productSerials && movement.productSerials.length > 0 ? (
+                  <div className="flex flex-col gap-0.5">
+                    {movement.productSerials.slice(0, 10).map((s, i) => (
+                      <span key={i} className="font-mono text-xs">{s.serialNumber}</span>
+                    ))}
+                    {movement.productSerials.length > 10 && (
+                      <span className="text-muted-foreground text-xs">+{movement.productSerials.length - 10} more</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">{movement.serialCount} serial(s)</span>
+                )}
+              </div>
+            )}
             <div><span className="font-medium text-muted-foreground">Reference</span><br />{movement.referenceType ?? '—'} {movement.referenceNumber ?? ''} {movement.referenceId ?? ''}</div>
             <div><span className="font-medium text-muted-foreground">Performed by</span><br />{movement.createdBy?.email ?? '—'}</div>
             {movement.notes && <div><span className="font-medium text-muted-foreground">Notes</span><br />{movement.notes}</div>}
@@ -701,7 +773,7 @@ function AdjustStockModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (opts?: { pendingApproval?: boolean }) => void;
   warehouses: { id: string; name: string; code: string | null }[];
 }) {
   const { toast } = useToast();
@@ -763,6 +835,11 @@ function AdjustStockModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast({ title: 'Adjustment failed', description: data.error || res.statusText, variant: 'destructive' });
+        return;
+      }
+      if (res.status === 202 && data.pendingApproval) {
+        toast({ title: 'Sent for approval', description: data.message ?? 'Adjustment submitted for approval.' });
+        onSuccess({ pendingApproval: true });
         return;
       }
       onSuccess();
@@ -889,7 +966,7 @@ function TransferStockModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (opts?: { pendingApproval?: boolean }) => void;
   warehouses: { id: string; name: string; code: string | null }[];
 }) {
   const { toast } = useToast();
@@ -946,6 +1023,11 @@ function TransferStockModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast({ title: 'Transfer failed', description: data.error || res.statusText, variant: 'destructive' });
+        return;
+      }
+      if (res.status === 202 && data.pendingApproval) {
+        toast({ title: 'Sent for approval', description: data.message ?? 'Transfer submitted for approval.' });
+        onSuccess({ pendingApproval: true });
         return;
       }
       onSuccess();

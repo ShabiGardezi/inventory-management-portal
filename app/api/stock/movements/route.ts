@@ -58,6 +58,14 @@ export async function GET(request: NextRequest) {
       product: m.product,
       warehouse: m.warehouse,
       createdBy: m.createdBy,
+      batch: m.batch
+        ? {
+            id: m.batch.id,
+            batchNumber: m.batch.batchNumber,
+            expiryDate: m.batch.expiryDate instanceof Date ? m.batch.expiryDate.toISOString().slice(0, 10) : m.batch.expiryDate,
+          }
+        : null,
+      serialCount: m.serialCount ?? null,
     }));
     return createSuccessResponse({
       rows,

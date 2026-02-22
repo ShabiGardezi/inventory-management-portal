@@ -36,23 +36,37 @@ role_permissions
 
 ```
 products
-  id (cuid), sku (unique), name, description, category, unit, price, costPrice, reorderLevel, isActive, createdAt, updatedAt
+  id (cuid), sku (unique), name, description, category, unit, price, costPrice, reorderLevel, isActive,
+  trackBatches (boolean, default false), trackSerials (boolean, default false), createdAt, updatedAt
 
 warehouses
   id (cuid), code (unique, optional), name, address, city, country, isActive, createdAt, updatedAt
 
+batches
+  id (cuid), productId (FK products), batchNumber, mfgDate (optional), expiryDate (optional), notes, createdAt, updatedAt
+  @@unique([productId, batchNumber])
+
+product_serials
+  id (cuid), productId (FK), serialNumber, status (IN_STOCK|SOLD|DAMAGED|RETURNED), warehouseId (FK, optional),
+  batchId (FK, optional), movementId (FK, optional), acquiredAt, disposedAt, createdAt, updatedAt
+  @@unique([productId, serialNumber])
+
 stock_movements
   id (cuid), productId (FK), warehouseId (FK), movementType (IN|OUT|TRANSFER|ADJUSTMENT),
   quantity (Decimal, positive), referenceType (PURCHASE|SALE|TRANSFER|ADJUSTMENT|MANUAL),
-  referenceId, referenceNumber, notes, createdById (FK users, optional), createdAt, updatedAt
+  referenceId, referenceNumber, notes, createdById (FK users, optional),
+  batchId (FK batches, optional), serialCount (int, optional), createdAt, updatedAt
 
 stock_balances
-  id (cuid), productId (FK), warehouseId (FK), quantity, reserved, available, lastUpdated, createdAt, updatedAt
-  @@unique([productId, warehouseId])
+  id (cuid), productId (FK), warehouseId (FK), batchId (FK batches, optional), quantity, reserved, available, lastUpdated, createdAt, updatedAt
+  @@unique([productId, warehouseId, batchId])
 ```
 
-- **stock_movements** — Immutable ledger; every stock change is one (or two for transfer) new row(s).
-- **stock_balances** — One row per (product, warehouse); updated only by `StockService` when creating movements. `available` = quantity - reserved (reserved can be used for future order-hold features).
+- **products** — `trackBatches` and `trackSerials` enable batch/serial tracking; when true, IN/OUT must supply batch or serial data as per business rules.
+- **batches** — One row per (productId, batchNumber); used when product.trackBatches is true. Movements and balances reference batchId.
+- **product_serials** — One row per (productId, serialNumber); status and warehouseId updated on receive/transfer/sale. Used when product.trackSerials is true.
+- **stock_movements** — Immutable ledger; every stock change is one (or two for transfer) new row(s). Optional `batchId` and `serialCount` for batch/serial tracking.
+- **stock_balances** — One row per (productId, warehouseId, batchId); `batchId` null = non-batch balance. Updated only by `StockService` when creating movements. `available` = quantity - reserved.
 
 ### Settings (single-tenant)
 
@@ -84,8 +98,10 @@ audit_logs
 
 ## Key Constraints and Indexes
 
-- **stock_movements**: indexes on productId, warehouseId, movementType, createdAt, referenceNumber, createdById; composite (warehouseId, createdAt), (productId, createdAt), (movementType, createdAt).
-- **stock_balances**: unique (productId, warehouseId); indexes on productId, warehouseId, available.
+- **batches**: unique (productId, batchNumber); index on (productId, expiryDate).
+- **product_serials**: unique (productId, serialNumber); indexes on (productId, status), (warehouseId, status).
+- **stock_movements**: indexes on productId, warehouseId, movementType, createdAt, referenceNumber, createdById, batchId; composite (warehouseId, createdAt), (productId, createdAt), (movementType, createdAt).
+- **stock_balances**: unique (productId, warehouseId, batchId); indexes on productId, warehouseId, batchId, available.
 - **users**: index on email, isActive.
 - **permissions**: index on name, (resource, action), module.
 - **audit_logs**: indexes on userId, action, resource, resourceId, createdAt.

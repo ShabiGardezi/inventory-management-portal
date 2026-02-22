@@ -30,6 +30,8 @@ model User {
   userSettings   UserSettings?
   auditLogs      AuditLog[]
   stockMovements StockMovement[] @relation("StockMovementCreator")
+  approvalRequestsRequested ApprovalRequest[] @relation("ApprovalRequestRequestedBy")
+  approvalRequestsReviewed  ApprovalRequest[] @relation("ApprovalRequestReviewedBy")
 
   @@index([email])
   @@index([isActive])
@@ -114,6 +116,7 @@ model RolePermission {
 model Product {
   id           String    @id @default(cuid())
   sku          String    @unique
+  barcode      String?   // Optional; for scan lookup (indexed)
   name         String
   description  String?
   category     String?
@@ -125,11 +128,24 @@ model Product {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  // Batch/lot and serial tracking (optional; existing flows work without)
+  trackBatches Boolean @default(false)
+  trackSerials Boolean @default(false)
+
   // Relations
-  stockMovements StockMovement[]
-  stockBalances  StockBalance[]
+  stockMovements    StockMovement[]
+  stockBalances     StockBalance[]
+  batches           Batch[]
+  productSerials    ProductSerial[]
+  inventoryLayers   InventoryLayer[]
+  saleItems         SaleItem[]
+  reorderPolicies   ReorderPolicy[]
+  inventoryMetrics  InventoryMetrics[]
+  stockAdjustments  StockAdjustment[]
+  stockTransfers    StockTransfer[]
 
   @@index([sku])
+  @@index([barcode])
   @@index([name])
   @@index([category])
   @@index([isActive])
@@ -148,12 +164,129 @@ model Warehouse {
   updatedAt DateTime @updatedAt
 
   // Relations
-  stockMovements StockMovement[]
-  stockBalances  StockBalance[]
+  stockMovements    StockMovement[]
+  stockBalances     StockBalance[]
+  productSerials   ProductSerial[]
+  inventoryLayers  InventoryLayer[]
+  saleItems        SaleItem[]
+  reorderPolicies  ReorderPolicy[]
+  inventoryMetrics InventoryMetrics[]
+  stockAdjustments  StockAdjustment[]
+  stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
+  stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
 
   @@index([code])
   @@index([isActive])
   @@map("warehouses")
+}
+
+// ============================================
+// Smart Reorder & Forecasting (Phase 3)
+// ============================================
+
+model ReorderPolicy {
+  id            String    @id @default(cuid())
+  tenantId      String?   // Optional for multi-tenant
+  productId     String
+  warehouseId   String
+  minStock      Decimal   @db.Decimal(12, 4)
+  maxStock      Decimal?  @db.Decimal(12, 4)
+  leadTimeDays  Int
+  safetyStock   Decimal   @db.Decimal(12, 4) @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([tenantId, productId, warehouseId])
+  @@map("reorder_policies")
+}
+
+model InventoryMetrics {
+  id                    String    @id @default(cuid())
+  tenantId              String?   // Optional for multi-tenant
+  productId             String
+  warehouseId           String
+  avgDailySales         Decimal   @db.Decimal(12, 4)
+  daysOfCover           Decimal   @db.Decimal(12, 4)
+  predictedStockoutDate DateTime?
+  suggestedReorderQty   Decimal   @db.Decimal(12, 4)
+  lastComputedAt        DateTime
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([productId, warehouseId])
+  @@index([predictedStockoutDate])
+  @@map("inventory_metrics")
+}
+
+// ============================================
+// Batch/Lot + Serial Tracking
+// ============================================
+
+model Batch {
+  id          String    @id @default(cuid())
+  productId   String
+  batchNumber String
+  barcode     String?   // Optional; for scan lookup (indexed)
+  mfgDate     DateTime? @db.Date
+  expiryDate  DateTime? @db.Date
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  product          Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stockMovements   StockMovement[]
+  stockBalances    StockBalance[]
+  productSerials   ProductSerial[]
+  inventoryLayers  InventoryLayer[]
+
+  @@unique([productId, batchNumber])
+  @@index([productId, expiryDate])
+  @@index([barcode])
+  @@map("batches")
+}
+
+enum SerialStatus {
+  IN_STOCK
+  SOLD
+  DAMAGED
+  RETURNED
+}
+
+model ProductSerial {
+  id           String       @id @default(cuid())
+  productId    String
+  serialNumber String
+  status       SerialStatus @default(IN_STOCK)
+  warehouseId  String?      // Where it currently is
+  batchId      String?
+  movementId   String?      // Movement that received/disposed this serial
+  acquiredAt   DateTime     @default(now())
+  disposedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  batch     Batch?     @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  movement  StockMovement? @relation(fields: [movementId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, serialNumber])
+  @@index([productId, status])
+  @@index([serialNumber])
+  @@index([warehouseId, status])
+  @@map("product_serials")
 }
 
 enum StockMovementType {
@@ -182,13 +315,18 @@ model StockMovement {
   referenceNumber String?                    // e.g., PO number, SO number, Transfer ID (display)
   notes           String?
   createdById     String?                    // User who created the movement
+  batchId         String?                    // Optional batch for batch-tracked products
+  serialCount     Int?                       // Optional count of serials in this movement (display)
   createdAt       DateTime                   @default(now())
   updatedAt       DateTime                   @updatedAt
 
   // Relations
-  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
-  createdBy User?     @relation("StockMovementCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  product             Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse            Warehouse            @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy            User?                @relation("StockMovementCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  batch                Batch?               @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  productSerials       ProductSerial[]
+  inventoryConsumptions InventoryConsumption[]
 
   @@index([productId])
   @@index([warehouseId])
@@ -196,9 +334,11 @@ model StockMovement {
   @@index([createdAt])
   @@index([referenceNumber])
   @@index([createdById])
+  @@index([batchId])
   @@index([warehouseId, createdAt])
   @@index([productId, createdAt])
   @@index([movementType, createdAt])
+  @@index([productId, warehouseId, movementType, referenceType, createdAt])
   @@map("stock_movements")
 }
 
@@ -206,6 +346,7 @@ model StockBalance {
   id          String   @id @default(cuid())
   productId   String
   warehouseId String
+  batchId     String?  // Optional; null = non-batch (existing rows remain valid)
   quantity    Decimal  @db.Decimal(10, 2) @default(0)
   reserved    Decimal  @db.Decimal(10, 2) @default(0) // Reserved for orders
   available   Decimal  @db.Decimal(10, 2) @default(0) // Available = quantity - reserved
@@ -216,12 +357,122 @@ model StockBalance {
   // Relations
   product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  batch     Batch?    @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
-  @@unique([productId, warehouseId])
+  @@unique([productId, warehouseId, batchId])
   @@index([productId])
   @@index([warehouseId])
+  @@index([batchId])
   @@index([available])
   @@map("stock_balances")
+}
+
+// ============================================
+// Inventory Valuation (Phase 2)
+// ============================================
+
+enum ValuationMethod {
+  AVERAGE_COST
+  FIFO
+}
+
+enum InventoryLayerSourceType {
+  PURCHASE
+  OPENING
+  ADJUSTMENT
+}
+
+model InventoryLayer {
+  id           String                    @id @default(cuid())
+  productId    String
+  warehouseId  String
+  batchId      String?                    // Nullable when batch tracking not used
+  sourceType   InventoryLayerSourceType   // PURCHASE | OPENING | ADJUSTMENT
+  sourceId     String?                   // e.g. purchaseId, adjustment reference
+  acquiredAt   DateTime                  // When stock came in (for FIFO ordering)
+  unitCost     Decimal                   @db.Decimal(12, 4)
+  qtyInitial   Decimal                   @db.Decimal(12, 4)
+  qtyRemaining Decimal                   @db.Decimal(12, 4)
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
+  // Relations
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  batch     Batch?    @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  consumptions InventoryConsumption[]
+
+  @@index([productId, warehouseId, acquiredAt])
+  @@index([warehouseId, acquiredAt])
+  @@index([productId, batchId, acquiredAt])
+  @@map("inventory_layers")
+}
+
+model InventoryConsumption {
+  id          String   @id @default(cuid())
+  saleItemId  String?  // Nullable; links to SaleItem when COGS from a sale line
+  movementId  String?  // Nullable; links to StockMovement when no sale item (e.g. adjustment OUT)
+  layerId     String
+  quantity    Decimal  @db.Decimal(12, 4)
+  unitCost    Decimal  @db.Decimal(12, 4)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  layer      InventoryLayer @relation(fields: [layerId], references: [id], onDelete: Restrict)
+  saleItem   SaleItem?      @relation(fields: [saleItemId], references: [id], onDelete: SetNull)
+  movement   StockMovement? @relation(fields: [movementId], references: [id], onDelete: SetNull)
+
+  @@index([saleItemId])
+  @@index([layerId])
+  @@map("inventory_consumptions")
+}
+
+// ============================================
+// Sales (for COGS / margin; optional header + lines)
+// ============================================
+
+model Sale {
+  id              String     @id @default(cuid())
+  referenceNumber String?    // e.g. SO-001
+  status          SaleStatus @default(DRAFT) // DRAFT | PENDING_APPROVAL | APPROVED | CONFIRMED | REJECTED
+  totalCogs       Decimal?   @db.Decimal(12, 4) // Sum of line COGS
+  totalMargin     Decimal?   @db.Decimal(12, 4) // Sum of line margin
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  items SaleItem[]
+}
+
+enum SaleStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  CONFIRMED
+  REJECTED
+}
+
+model SaleItem {
+  id              String    @id @default(cuid())
+  saleId          String
+  productId       String
+  warehouseId     String
+  quantity        Decimal   @db.Decimal(12, 4)
+  unitPrice       Decimal?  @db.Decimal(12, 4)
+  unitCostAtSale  Decimal?  @db.Decimal(12, 4) // Snapshot at sale for reporting
+  cogsTotal       Decimal?  @db.Decimal(12, 4)
+  marginTotal     Decimal?  @db.Decimal(12, 4)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  sale     Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product  Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  consumptions InventoryConsumption[]
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
 }
 
 // ============================================
@@ -254,6 +505,10 @@ model Settings {
   quantityPrecision          String  @default("integer") // "integer" | "decimal"
   lowStockThresholdBehavior  String  @default("reorderLevel") // "reorderLevel" | "globalThreshold"
 
+  // Valuation (Phase 2)
+  valuationMethod  ValuationMethod @default(AVERAGE_COST) // AVERAGE_COST | FIFO
+  showFinancials   Boolean         @default(true)         // Permission gating default
+
   // Notifications
   lowStockNotificationsEnabled Boolean @default(true)
   dailySummaryEmailEnabled     Boolean @default(false)
@@ -280,6 +535,162 @@ model UserSettings {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@map("user_settings")
+}
+
+// ============================================
+// Approval Workflow (Phase 4)
+// ============================================
+
+enum ApprovalEntityType {
+  STOCK_ADJUSTMENT
+  STOCK_TRANSFER
+  PURCHASE_RECEIVE
+  SALE_CONFIRM
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model ApprovalRequest {
+  id                 String             @id @default(cuid())
+  tenantId           String?            // Optional for multi-tenant
+  entityType         ApprovalEntityType
+  entityId           String             // ID of the purchase/transfer/adjustment/sale record
+  status             ApprovalStatus     @default(PENDING)
+  requestedByUserId  String
+  requestedAt        DateTime           @default(now())
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  reviewComment      String?
+  requestComment     String?
+  metadata           Json?              // Payload snapshot / summary (no secrets)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relations
+  requestedBy User  @relation("ApprovalRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy  User? @relation("ApprovalRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, requestedAt])
+  @@index([entityType, status])
+  @@index([entityId])
+  @@map("approval_requests")
+}
+
+model ApprovalPolicy {
+  id                String   @id @default(cuid())
+  tenantId          String?  // Optional for multi-tenant
+  entityType        ApprovalEntityType
+  isEnabled         Boolean  @default(false)
+  requiredPermission String? // e.g. "approvals.review"; prefer permission-based
+  requiredRoleId    String?  // Optional role-based; nullable
+  minAmount         Decimal? @db.Decimal(12, 4) // Optional for purchases
+  warehouseScopeId  String? // Optional later
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([tenantId, entityType])
+  @@index([tenantId, entityType])
+  @@map("approval_policies")
+}
+
+// ============================================
+// Lightweight request tables (for approval linkage via entityId)
+// ============================================
+
+enum StockAdjustmentStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  APPLIED
+  REJECTED
+  CANCELLED
+}
+
+model StockAdjustment {
+  id              String                 @id @default(cuid())
+  productId       String
+  warehouseId      String
+  method          String                 // increase | decrease | set
+  quantity        Decimal?               @db.Decimal(12, 4) // for increase/decrease
+  newQuantity     Decimal?               @db.Decimal(12, 4) // for set
+  reason          String                 // damage | recount | correction | opening_stock
+  notes           String?
+  status          StockAdjustmentStatus  @default(DRAFT)
+  requestedById   String?
+  appliedAt       DateTime?              // When StockService was called
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([productId, warehouseId])
+  @@map("stock_adjustments")
+}
+
+enum StockTransferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  APPLIED
+  REJECTED
+  CANCELLED
+}
+
+model StockTransfer {
+  id                String               @id @default(cuid())
+  productId         String
+  fromWarehouseId   String
+  toWarehouseId     String
+  quantity          Decimal              @db.Decimal(12, 4)
+  referenceNumber   String?
+  notes             String?
+  status            StockTransferStatus  @default(DRAFT)
+  requestedById     String?
+  appliedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  // Relations (for approval linkage; entityId = this id)
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  fromWarehouse  Warehouse @relation("StockTransferFrom", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
+  toWarehouse    Warehouse @relation("StockTransferTo", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([productId])
+  @@index([fromWarehouseId, toWarehouseId])
+  @@map("stock_transfers")
+}
+
+enum PurchaseReceiveStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  RECEIVED
+  REJECTED
+  CANCELLED
+}
+
+model PurchaseReceiveRequest {
+  id              String                  @id @default(cuid())
+  referenceNumber String?
+  notes           String?
+  status          PurchaseReceiveStatus   @default(DRAFT)
+  requestedById   String?
+  receivedAt      DateTime?              // When StockService.receivePurchase was called
+  payload         Json?                   // Snapshot of items (productId, warehouseId, quantity, etc.)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([status])
+  @@index([referenceNumber])
+  @@map("purchase_receive_requests")
 }
 
 // ============================================

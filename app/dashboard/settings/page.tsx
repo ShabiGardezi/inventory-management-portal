@@ -9,8 +9,9 @@ import { OrganizationSection } from '@/components/settings/organization-section'
 import { InventorySection } from '@/components/settings/inventory-section';
 import { NotificationsSection } from '@/components/settings/notifications-section';
 import { RolesAuditSystemSection } from '@/components/settings/roles-audit-system-section';
+import { ApprovalPoliciesSection } from '@/components/settings/approval-policies-section';
 import type { SettingsResponse } from '@/lib/settings-types';
-import { User, Building2, Package, Bell, Shield } from 'lucide-react';
+import { User, Building2, Package, Bell, Shield, ClipboardCheck } from 'lucide-react';
 
 export default function SettingsPage() {
   const [data, setData] = useState<SettingsResponse | null>(null);
@@ -80,6 +81,7 @@ export default function SettingsPage() {
   const canManageRoles = permissions.includes('roles.manage');
   const canReadAudit = permissions.includes('audit.read') || permissions.includes('audit:read');
   const canReadReports = permissions.includes('reports.read');
+  const canManageApprovals = permissions.includes('approvals.manage');
 
   const defaultOrg = {
     companyName: null,
@@ -118,6 +120,7 @@ export default function SettingsPage() {
   const showInv = hasSettingsRead;
   const showNotif = hasSettingsRead;
   const showRolesAudit = canManageRoles || canReadAudit || canReadReports;
+  const showApprovalPolicies = canManageApprovals;
 
   return (
     <div className="space-y-6">
@@ -154,6 +157,12 @@ export default function SettingsPage() {
             <TabsTrigger value="roles-audit" className="flex items-center gap-2">
               <Shield className="h-4 w-4" />
               Roles & Audit
+            </TabsTrigger>
+          )}
+          {showApprovalPolicies && (
+            <TabsTrigger value="approval-policies" className="flex items-center gap-2">
+              <ClipboardCheck className="h-4 w-4" />
+              Approval Policies
             </TabsTrigger>
           )}
         </TabsList>
@@ -207,9 +216,15 @@ export default function SettingsPage() {
             />
           </TabsContent>
         )}
+
+        {showApprovalPolicies && (
+          <TabsContent value="approval-policies">
+            <ApprovalPoliciesSection />
+          </TabsContent>
+        )}
       </Tabs>
 
-      {activeTab && !['profile', 'organization', 'inventory', 'notifications', 'roles-audit'].includes(activeTab) && (
+      {activeTab && !['profile', 'organization', 'inventory', 'notifications', 'roles-audit', 'approval-policies'].includes(activeTab) && (
         <Card>
           <CardContent className="pt-6">
             <p className="text-muted-foreground">You don&apos;t have access to this section.</p>

@@ -31,6 +31,8 @@ const createProductSchema = z.object({
     .nullable(),
   reorderLevel: z.number().int().min(0, 'Reorder level must be 0 or more').optional().nullable(),
   isActive: z.boolean().default(true),
+  trackBatches: z.boolean().default(false),
+  trackSerials: z.boolean().default(false),
 });
 
 export async function POST(request: NextRequest) {
@@ -75,6 +77,8 @@ export async function POST(request: NextRequest) {
         price: data.price ?? null,
         reorderLevel: data.reorderLevel ?? null,
         isActive: data.isActive,
+        trackBatches: data.trackBatches ?? false,
+        trackSerials: data.trackSerials ?? false,
       },
     });
 

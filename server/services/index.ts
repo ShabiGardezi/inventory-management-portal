@@ -7,3 +7,5 @@ export { StockService } from './stock.service';
 export * from './stockMovementService';
 export { WarehouseService } from './warehouse.service';
 export { UserService } from './userService';
+export { InventoryMetricsService } from './inventoryMetricsService';
+export * from './approvalService';

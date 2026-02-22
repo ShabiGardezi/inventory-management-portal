@@ -7,7 +7,11 @@ import {
   createSuccessResponse,
 } from '@/lib/rbac';
 import { prisma } from '@/lib/prisma';
-import { StockService } from '@/server/services';
+import {
+  StockService,
+  isApprovalRequired,
+  requestApproval,
+} from '@/server/services';
 import { getInventoryRules } from '@/server/services/settingsService';
 
 const transferSchema = z.object({
@@ -51,6 +55,47 @@ export async function POST(request: NextRequest) {
     if (createdById) {
       const userExists = await prisma.user.findUnique({ where: { id: createdById }, select: { id: true } });
       if (!userExists) createdById = undefined;
+    }
+
+    const needsApproval = await isApprovalRequired(prisma, 'STOCK_TRANSFER', {
+      warehouseId: data.fromWarehouseId,
+    });
+    if (needsApproval) {
+      const transfer = await prisma.stockTransfer.create({
+        data: {
+          productId: data.productId,
+          fromWarehouseId: data.fromWarehouseId,
+          toWarehouseId: data.toWarehouseId,
+          quantity: data.quantity,
+          notes: data.notes ?? null,
+          status: 'PENDING_APPROVAL',
+          requestedById: createdById ?? null,
+        },
+        select: { id: true },
+      });
+      const approval = await requestApproval(prisma, {
+        entityType: 'STOCK_TRANSFER',
+        entityId: transfer.id,
+        requestedBy: user.id,
+        requestComment: data.notes ?? undefined,
+        metadata: {
+          productId: data.productId,
+          fromWarehouseId: data.fromWarehouseId,
+          toWarehouseId: data.toWarehouseId,
+          quantity: data.quantity,
+        },
+      });
+      revalidateTag('dashboard');
+      revalidateTag('stock-movements');
+      return createSuccessResponse(
+        {
+          pendingApproval: true,
+          message: 'Transfer submitted for approval',
+          requestId: approval.id,
+          entityId: transfer.id,
+        },
+        202
+      );
     }
 
     const stockService = new StockService(prisma);

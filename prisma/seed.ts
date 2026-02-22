@@ -20,7 +20,6 @@ import {
   seedSales,
   seedTransfers,
   seedAdjustments,
-  syncBalancesFromLedger,
   type StockSeedContext,
 } from './seed/generators/stock';
 import { seedAuditLogs } from './seed/generators/audit';
@@ -188,9 +187,7 @@ async function runSeed(config: SeedConfig): Promise<void> {
   await seedTransfers(prisma, stockCtx, balanceMap);
   console.log('  Creating adjustments...');
   await seedAdjustments(prisma, stockCtx, balanceMap);
-  console.log('  Syncing balances from ledger...');
-  await syncBalancesFromLedger(prisma);
-  console.log('✅ Stock movements and balances done.');
+  console.log('✅ Stock movements and balances done (via StockService).');
 
   const auditCount = await seedAuditLogs(prisma, {
     users: { users, userIdByEmail },

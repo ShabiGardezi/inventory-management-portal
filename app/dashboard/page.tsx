@@ -90,6 +90,14 @@ interface DashboardData {
       price: number | null;
       totalAvailable: number;
     }[];
+    likelyToStockOut?: {
+      productId: string;
+      productName: string;
+      warehouseId: string;
+      warehouseName: string;
+      daysOfCover: number;
+      predictedStockoutDate: string | null;
+    }[];
     recentMovements?: {
       id: string;
       movementType: string;
@@ -545,6 +553,64 @@ export default function DashboardPage() {
 
       {hasAnyTable && (
         <div className="grid gap-4 md:grid-cols-2">
+          {tables.likelyToStockOut && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <div>
+                  <CardTitle>Likely to Stock Out</CardTitle>
+                  <CardDescription>Lowest days of cover (top 5)</CardDescription>
+                </div>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/dashboard/reports?tab=reorder-suggestions">
+                    View all <ArrowRight className="ml-1 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {tables.likelyToStockOut.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">No stock-out risk data.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Warehouse</TableHead>
+                        <TableHead className="text-right">Days of cover</TableHead>
+                        <TableHead>Stockout date</TableHead>
+                        <TableHead className="w-[80px]">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tables.likelyToStockOut.map((row) => {
+                        const days = row.daysOfCover;
+                        const badge =
+                          days < 7
+                            ? { label: 'Critical', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }
+                            : days < 14
+                              ? { label: 'Warning', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300' }
+                              : { label: 'OK', className: 'bg-muted text-muted-foreground' };
+                        return (
+                          <TableRow key={`${row.productId}-${row.warehouseId}`}>
+                            <TableCell className="font-medium">{row.productName}</TableCell>
+                            <TableCell className="text-muted-foreground">{row.warehouseName}</TableCell>
+                            <TableCell className="text-right">{days.toFixed(1)}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {row.predictedStockoutDate ? formatDate(row.predictedStockoutDate) : '—'}
+                            </TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${badge.className}`}>
+                                {badge.label}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          )}
           {tables.lowStock && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

@@ -37,6 +37,11 @@ export interface WarehouseStockRow {
   reorderLevel: number | null;
   value: number;
   lastUpdated: Date;
+  batchId: string | null;
+  batchNumber: string | null;
+  expiryDate: Date | null;
+  trackBatches: boolean;
+  trackSerials: boolean;
 }
 
 export interface MovementRow {
@@ -290,7 +295,12 @@ export class WarehouseRepository {
             costPrice: true,
             price: true,
             reorderLevel: true,
+            trackBatches: true,
+            trackSerials: true,
           },
+        },
+        batch: {
+          select: { id: true, batchNumber: true, expiryDate: true },
         },
       },
     });
@@ -311,6 +321,11 @@ export class WarehouseRepository {
           reorderLevel,
           value: onHand * cost,
           lastUpdated: b.lastUpdated,
+          batchId: b.batch?.id ?? null,
+          batchNumber: b.batch?.batchNumber ?? null,
+          expiryDate: b.batch?.expiryDate ?? null,
+          trackBatches: p.trackBatches ?? false,
+          trackSerials: p.trackSerials ?? false,
         };
       });
 

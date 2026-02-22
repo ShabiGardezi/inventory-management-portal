@@ -7,6 +7,7 @@ const TEST_PASSWORD = 'TestPassword1!';
 export interface TestUser {
   id: string;
   email: string;
+  name: string | null;
   permissions: string[];
   roles: string[];
 }
@@ -70,6 +71,7 @@ export async function createUserWithPermissions(
   return {
     id: user.id,
     email: user.email,
+    name: user.name ?? null,
     permissions: Array.from(perms),
     roles: user.userRoles.map((ur) => ur.role.name),
   };
@@ -132,9 +134,51 @@ export async function createUserWithRole(
   return {
     id: user.id,
     email: user.email,
+    name: user.name ?? null,
     permissions: Array.from(perms),
     roles: user.userRoles.map((ur) => ur.role.name),
   };
+}
+
+/** Enable (or create) an approval policy for the given entity type. */
+export async function enableApprovalPolicy(
+  prisma: PrismaClient,
+  entityType: 'PURCHASE_RECEIVE' | 'SALE_CONFIRM' | 'STOCK_ADJUSTMENT' | 'STOCK_TRANSFER'
+): Promise<void> {
+  const existing = await prisma.approvalPolicy.findFirst({
+    where: { tenantId: null, entityType },
+  });
+  if (existing) {
+    await prisma.approvalPolicy.update({
+      where: { id: existing.id },
+      data: { isEnabled: true },
+    });
+  } else {
+    await prisma.approvalPolicy.create({
+      data: {
+        tenantId: null,
+        entityType,
+        isEnabled: true,
+        requiredPermission: 'approvals.review',
+      },
+    });
+  }
+}
+
+/** Disable approval policy for entity type (for tests that need direct execution). */
+export async function disableApprovalPolicy(
+  prisma: PrismaClient,
+  entityType: 'PURCHASE_RECEIVE' | 'SALE_CONFIRM' | 'STOCK_ADJUSTMENT' | 'STOCK_TRANSFER'
+): Promise<void> {
+  const existing = await prisma.approvalPolicy.findFirst({
+    where: { tenantId: null, entityType },
+  });
+  if (existing) {
+    await prisma.approvalPolicy.update({
+      where: { id: existing.id },
+      data: { isEnabled: false },
+    });
+  }
 }
 
 export async function createWarehouse(prisma: PrismaClient, name?: string): Promise<{ id: string; name: string }> {
@@ -149,7 +193,11 @@ export async function createWarehouse(prisma: PrismaClient, name?: string): Prom
   return { id: w.id, name: w.name };
 }
 
-export async function createProduct(prisma: PrismaClient, sku?: string): Promise<{ id: string; sku: string; name: string }> {
+export async function createProduct(
+  prisma: PrismaClient,
+  sku?: string,
+  options?: { trackBatches?: boolean; trackSerials?: boolean }
+): Promise<{ id: string; sku: string; name: string }> {
   const s = sku ?? `SKU-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const p = await prisma.product.create({
     data: {
@@ -157,6 +205,8 @@ export async function createProduct(prisma: PrismaClient, sku?: string): Promise
       name: `Product ${s}`,
       unit: 'pcs',
       isActive: true,
+      trackBatches: options?.trackBatches ?? false,
+      trackSerials: options?.trackSerials ?? false,
     },
   });
   return { id: p.id, sku: p.sku, name: p.name };

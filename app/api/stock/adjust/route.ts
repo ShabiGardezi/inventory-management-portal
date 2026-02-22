@@ -7,7 +7,12 @@ import {
   createSuccessResponse,
 } from '@/lib/rbac';
 import { prisma } from '@/lib/prisma';
-import { StockService } from '@/server/services';
+import {
+  StockService,
+  InventoryMetricsService,
+  isApprovalRequired,
+  requestApproval,
+} from '@/server/services';
 import { getInventoryRules } from '@/server/services/settingsService';
 
 const adjustSchema = z.object({
@@ -58,6 +63,51 @@ export async function POST(request: NextRequest) {
       if (!userExists) createdById = undefined;
     }
 
+    const needsApproval = await isApprovalRequired(prisma, 'STOCK_ADJUSTMENT', {
+      warehouseId: data.warehouseId,
+    });
+    if (needsApproval) {
+      const adj = await prisma.stockAdjustment.create({
+        data: {
+          productId: data.productId,
+          warehouseId: data.warehouseId,
+          method: data.method,
+          quantity: data.quantity ?? null,
+          newQuantity: data.newQuantity ?? null,
+          reason: data.reason,
+          notes: data.notes ?? null,
+          status: 'PENDING_APPROVAL',
+          requestedById: createdById ?? null,
+        },
+        select: { id: true },
+      });
+      const approval = await requestApproval(prisma, {
+        entityType: 'STOCK_ADJUSTMENT',
+        entityId: adj.id,
+        requestedBy: user.id,
+        requestComment: data.notes ?? undefined,
+        metadata: {
+          productId: data.productId,
+          warehouseId: data.warehouseId,
+          method: data.method,
+          quantity: data.quantity,
+          newQuantity: data.newQuantity,
+          reason: data.reason,
+        },
+      });
+      revalidateTag('dashboard');
+      revalidateTag('stock-movements');
+      return createSuccessResponse(
+        {
+          pendingApproval: true,
+          message: 'Adjustment submitted for approval',
+          requestId: approval.id,
+          entityId: adj.id,
+        },
+        202
+      );
+    }
+
     const stockService = new StockService(prisma);
     const result = await stockService.adjustStock({
       productId: data.productId,
@@ -70,6 +120,9 @@ export async function POST(request: NextRequest) {
       createdById,
       allowNegative,
     });
+
+    const metricsService = new InventoryMetricsService(prisma);
+    await metricsService.recomputeForProductWarehouse(data.productId, data.warehouseId);
 
     revalidateTag('dashboard');
     revalidateTag('stock-movements');

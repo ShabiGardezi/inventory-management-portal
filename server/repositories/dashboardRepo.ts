@@ -541,4 +541,50 @@ export async function getRecentAuditLogs(
   }));
 }
 
+/**
+ * Top N product/warehouse pairs most likely to stock out (lowest days of cover).
+ * Uses InventoryMetrics; returns product name, warehouse name, daysOfCover, predictedStockoutDate.
+ */
+export async function getLikelyToStockOut(
+  limit: number,
+  deps?: DashboardRepoDeps
+): Promise<
+  {
+    productId: string;
+    productName: string;
+    warehouseId: string;
+    warehouseName: string;
+    daysOfCover: number;
+    predictedStockoutDate: Date | null;
+  }[]
+> {
+  const rows = await getPrisma(deps).inventoryMetrics.findMany({
+    where: {
+      product: { isActive: true },
+      warehouse: { isActive: true },
+    },
+    orderBy: { daysOfCover: 'asc' },
+    take: limit,
+    include: {
+      product: { select: { name: true } },
+      warehouse: { select: { name: true } },
+    },
+  });
+
+  return rows
+    .filter((r) => {
+      const d = Number(r.daysOfCover);
+      return Number.isFinite(d) && d >= 0;
+    })
+    .slice(0, limit)
+    .map((r) => ({
+      productId: r.productId,
+      productName: r.product.name,
+      warehouseId: r.warehouseId,
+      warehouseName: r.warehouse.name,
+      daysOfCover: Number(r.daysOfCover),
+      predictedStockoutDate: r.predictedStockoutDate,
+    }));
+}
+
 export { LOW_STOCK_THRESHOLD };

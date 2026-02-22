@@ -32,11 +32,15 @@ interface MovementRow {
   warehouseName: string;
   createdByEmail: string | null;
   value: number | null;
+  batchNumber: string | null;
+  serialCount: number | null;
 }
 
 interface MovementsTableProps {
   title: string;
   type?: 'IN' | 'OUT' | 'ALL'; // OUT = sales, IN = purchases, ALL = all movements
+  /** Increment to trigger a refetch (e.g. after receive/confirm) */
+  refreshTrigger?: number;
 }
 
 const MOVEMENT_COLORS: Record<string, string> = {
@@ -46,7 +50,7 @@ const MOVEMENT_COLORS: Record<string, string> = {
   ADJUSTMENT: 'hsl(38, 92%, 50%)',
 };
 
-export function MovementsTable({ title, type = 'ALL' }: MovementsTableProps) {
+export function MovementsTable({ title, type = 'ALL', refreshTrigger }: MovementsTableProps) {
   const [data, setData] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +84,13 @@ export function MovementsTable({ title, type = 'ALL' }: MovementsTableProps) {
       const json = await res.json();
       const rows = json.rows ?? json.movements ?? [];
       setData(
-        rows.map((r: { id?: string; movementType: string; quantity: string | number; referenceNumber: string | null; createdAt: string; product?: { name: string; sku: string }; productName?: string; productSku?: string; warehouse?: { name: string }; warehouseName?: string; createdBy?: { email: string } | null; createdByEmail?: string | null }) => ({
+        rows.map((r: {
+          id?: string; movementType: string; quantity: string | number; referenceNumber: string | null; createdAt: string;
+          product?: { name: string; sku: string }; productName?: string; productSku?: string;
+          warehouse?: { name: string }; warehouseName?: string;
+          createdBy?: { email: string } | null; createdByEmail?: string | null;
+          batch?: { batchNumber: string } | null; serialCount?: number | null;
+        }) => ({
           id: r.id ?? '',
           movementType: r.movementType,
           quantity: typeof r.quantity === 'string' ? Number(r.quantity) : r.quantity,
@@ -91,6 +101,8 @@ export function MovementsTable({ title, type = 'ALL' }: MovementsTableProps) {
           warehouseName: r.warehouse?.name ?? r.warehouseName ?? '',
           createdByEmail: r.createdBy?.email ?? r.createdByEmail ?? null,
           value: null as number | null,
+          batchNumber: r.batch?.batchNumber ?? null,
+          serialCount: r.serialCount ?? null,
         }))
       );
       const totalCount = json.total ?? json.pagination?.total ?? 0;
@@ -107,7 +119,7 @@ export function MovementsTable({ title, type = 'ALL' }: MovementsTableProps) {
 
   useEffect(() => {
     fetchData();
-  }, [page, limit, type, search, dateFrom, dateTo]);
+  }, [page, limit, type, search, dateFrom, dateTo, refreshTrigger]);
 
   const typeCol: ColumnDef<MovementRow> = {
     accessorKey: 'movementType',
@@ -142,6 +154,19 @@ export function MovementsTable({ title, type = 'ALL' }: MovementsTableProps) {
     { accessorKey: 'productSku', header: 'SKU', cell: (info) => <span className="font-mono text-muted-foreground">{String(info.getValue())}</span> },
     ...(type === 'ALL' ? [typeCol] : []),
     { accessorKey: 'quantity', header: 'Qty', cell: (info) => info.getValue() },
+    {
+      accessorKey: 'batchNumber',
+      header: 'Batch',
+      cell: (info) => info.getValue() ?? <span className="text-muted-foreground">—</span>,
+    },
+    {
+      accessorKey: 'serialCount',
+      header: 'Serials',
+      cell: (info) => {
+        const v = info.getValue();
+        return v != null ? v : <span className="text-muted-foreground">—</span>;
+      },
+    },
     valueCol,
     { accessorKey: 'warehouseName', header: 'Warehouse' },
     { accessorKey: 'referenceNumber', header: 'Reference', cell: (info) => info.getValue() ?? '—' },

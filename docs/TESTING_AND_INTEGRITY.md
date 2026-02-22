@@ -42,7 +42,22 @@ The **verify-integrity** script checks that the stock ledger and balances are co
 
 - After `db:seed` or any script that creates/updates stock.
 - In CI after integration tests that mutate stock.
+- After approval-based execution (receive/confirm/adjust/transfer executed via Approvals): ledger and balances remain consistent; `runIntegrityChecks` passes the same as for direct execution.
 - Periodically in production (e.g. cron) to detect integrity issues.
+
+---
+
+## Approval Integration Tests
+
+**`test/approval.integration.test.ts`** covers the approval workflow:
+
+- **PURCHASE_RECEIVE (policy enabled):** Receive creates approval_request and PurchaseReceiveRequest PENDING_APPROVAL; no stock_movements until approve; approve creates movements and RECEIVED; approving twice is idempotent (no double-apply).
+- **SALE_CONFIRM (policy enabled):** Confirm creates request and Sale PENDING_APPROVAL; no OUT movement until approve; approve creates OUT movement and CONFIRMED.
+- **Reject:** Reject sets entity REJECTED and no stock changes.
+- **RBAC:** User without `approvals.review` gets 403 on approve/reject.
+- **Integrity:** After approval execution, `runIntegrityChecks(prisma)` passes (ledger matches balances).
+
+Run: `npx vitest run test/approval.integration.test.ts` (requires test DB).
 
 ---
 

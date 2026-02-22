@@ -2,6 +2,17 @@ import { Decimal } from '@prisma/client/runtime/library';
 
 export type StockReferenceType = 'PURCHASE' | 'SALE' | 'TRANSFER' | 'ADJUSTMENT' | 'MANUAL';
 
+/** For batch-tracked IN: provide batchId (existing) or batchNumber to find-or-create. */
+export interface BatchInput {
+  batchId?: string | null;
+  batchNumber?: string;
+  mfgDate?: Date | null;
+  expiryDate?: Date | null;
+  notes?: string | null;
+}
+
+export type SerialDisposition = 'SOLD' | 'DAMAGED' | 'RETURNED';
+
 export interface IncreaseStockParams {
   productId: string;
   warehouseId: string;
@@ -11,6 +22,11 @@ export interface IncreaseStockParams {
   referenceId?: string | null;
   referenceNumber?: string;
   notes?: string;
+  /** When product.trackBatches: required (batchId or batchInput.batchNumber). */
+  batchId?: string | null;
+  batchInput?: BatchInput | null;
+  /** When product.trackSerials: optional on IN; creates ProductSerial IN_STOCK. */
+  serialNumbers?: string[] | null;
 }
 
 export interface DecreaseStockParams {
@@ -23,6 +39,12 @@ export interface DecreaseStockParams {
   referenceNumber?: string;
   notes?: string;
   allowNegative?: boolean; // Default: false
+  /** When product.trackBatches: required. */
+  batchId?: string | null;
+  /** When product.trackSerials: required, length must equal quantity. */
+  serialNumbers?: string[] | null;
+  /** When product.trackSerials: status to set on OUT (default SOLD). */
+  serialDisposition?: SerialDisposition;
 }
 
 export interface TransferStockParams {
@@ -36,6 +58,10 @@ export interface TransferStockParams {
   referenceNumber?: string;
   notes?: string;
   allowNegative?: boolean; // Default: false
+  /** When product.trackBatches: required (source batch). */
+  batchId?: string | null;
+  /** When product.trackSerials: required, length must equal quantity. */
+  serialNumbers?: string[] | null;
 }
 
 export type AdjustMethod = 'increase' | 'decrease' | 'set';
@@ -50,6 +76,10 @@ export interface AdjustStockParams {
   notes?: string;
   createdById?: string;
   allowNegative?: boolean; // Default: false
+  batchId?: string | null;
+  batchInput?: BatchInput | null;
+  serialNumbers?: string[] | null;
+  serialDisposition?: SerialDisposition;
 }
 
 export interface StockOperationResult {
@@ -103,6 +133,9 @@ export interface ReceivePurchaseParams {
   referenceNumber?: string;
   notes?: string;
   createdById?: string;
+  batchId?: string | null;
+  batchInput?: BatchInput | null;
+  serialNumbers?: string[] | null;
 }
 
 /** Single-line sale confirm/paid: OUT movement + balance update via StockService */
@@ -115,4 +148,7 @@ export interface ConfirmSaleParams {
   notes?: string;
   createdById?: string;
   allowNegative?: boolean;
+  batchId?: string | null;
+  serialNumbers?: string[] | null;
+  serialDisposition?: SerialDisposition;
 }

@@ -11,6 +11,7 @@ import {
   Shield,
   FileText,
   Settings,
+  ClipboardCheck,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -52,6 +53,12 @@ export const NAV_ITEMS: NavItem[] = [
     href: '/dashboard/sales',
     icon: ShoppingBag,
     requiredPermissions: ['sales:read', 'sales.read'],
+  },
+  {
+    label: 'Approvals',
+    href: '/dashboard/approvals',
+    icon: ClipboardCheck,
+    requiredPermissions: ['approvals.read', 'approvals.review'],
   },
   {
     label: 'Reports',

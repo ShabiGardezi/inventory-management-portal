@@ -1,9 +1,8 @@
-'use client';
-
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ProfileMenu } from '@/components/profile-menu';
+import { ScanNavButton } from '@/components/scan/scan-nav-button';
 
 const APP_NAME = 'Inventory Portal';
 
@@ -29,6 +28,7 @@ export function AppNavbar({ mobileMenuSlot }: AppNavbarProps) {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2">
+        <ScanNavButton />
         <Button variant="ghost" size="icon" className="relative h-9 w-9" aria-label="Notifications">
           <Bell className="h-4 w-4" />
         </Button>

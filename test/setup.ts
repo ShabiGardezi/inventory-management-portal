@@ -1,7 +1,9 @@
 /**
- * Test DB: use DATABASE_URL_TEST if set, else DATABASE_URL.
- * Ensures app singleton (lib/prisma) and test helpers use the same DB when running Vitest.
- * Run migrations on the test DB once (e.g. DATABASE_URL_TEST=... npx prisma migrate deploy).
+ * Test DB strategy:
+ * - Use DATABASE_URL_TEST if set, else DATABASE_URL (separate DB for tests recommended).
+ * - globalSetup runs prisma migrate deploy (or db push) so test DB schema is applied.
+ * - setupFiles (this file) runs before each test file; overrides process.env so lib/prisma and helpers use test DB.
+ * - Tests reset DB between runs via resetTestDb (truncate in FK-safe order).
  */
 import { config } from 'dotenv';
 config();

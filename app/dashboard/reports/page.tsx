@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   Download,
   ExternalLink,
+  ClipboardList,
 } from 'lucide-react';
 import { formatCurrency, formatDate, formatChartDate } from '@/lib/format';
 import {
@@ -64,6 +65,7 @@ const TAB_MOVEMENTS = 'movements';
 const TAB_SALES = 'sales';
 const TAB_PURCHASES = 'purchases';
 const TAB_AUDIT = 'audit';
+const TAB_REORDER_SUGGESTIONS = 'reorder-suggestions';
 
 const PERM_REPORTS = ['reports.read', 'reports:read'];
 const PERM_WAREHOUSE = ['warehouse.read', 'warehouse:read'];
@@ -131,6 +133,7 @@ export default function ReportsPage() {
   const showPurchases = hasAnyPermission(permissions, PERM_PURCHASE);
   const showAudit = hasAnyPermission(permissions, PERM_AUDIT);
   const canExport = hasAnyPermission(permissions, PERM_EXPORT);
+  const canShowFinancial = showSales || showPurchases;
 
   const setQuery = useCallback(
     (params: Record<string, string>) => {
@@ -232,6 +235,12 @@ export default function ReportsPage() {
               Audit
             </TabsTrigger>
           )}
+          {hasAnyPermission(permissions, PERM_REPORTS) && (
+            <TabsTrigger value={TAB_REORDER_SUGGESTIONS}>
+              <ClipboardList className="h-4 w-4 mr-1.5" />
+              Reorder Suggestions
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value={TAB_OVERVIEW} className="mt-4">
@@ -239,6 +248,7 @@ export default function ReportsPage() {
             searchParams={searchParams}
             canExport={canExport}
             currency="USD"
+            canShowFinancial={canShowFinancial}
           />
         </TabsContent>
         <TabsContent value={TAB_INVENTORY} className="mt-4">
@@ -247,6 +257,7 @@ export default function ReportsPage() {
             canExport={canExport}
             currency="USD"
             onQueryChange={setQuery}
+            canShowFinancial={canShowFinancial}
           />
         </TabsContent>
         <TabsContent value={TAB_MOVEMENTS} className="mt-4">
@@ -282,6 +293,15 @@ export default function ReportsPage() {
             />
           </TabsContent>
         )}
+        {hasAnyPermission(permissions, PERM_REPORTS) && (
+          <TabsContent value={TAB_REORDER_SUGGESTIONS} className="mt-4">
+            <ReportsReorderSuggestionsTab
+              searchParams={searchParams}
+              canExport={canExport}
+              onQueryChange={setQuery}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
@@ -301,10 +321,12 @@ function ReportsOverviewTab({
   searchParams,
   canExport,
   currency,
+  canShowFinancial = true,
 }: {
   searchParams: URLSearchParams;
   canExport: boolean;
   currency: string;
+  canShowFinancial?: boolean;
 }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -367,7 +389,7 @@ function ReportsOverviewTab({
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        {totalStockValue != null && (
+        {canShowFinancial && totalStockValue != null && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Stock Value</CardTitle>
@@ -387,7 +409,7 @@ function ReportsOverviewTab({
             </CardContent>
           </Card>
         )}
-        {totalSales != null && (
+        {canShowFinancial && totalSales != null && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Sales (range)</CardTitle>
@@ -397,7 +419,7 @@ function ReportsOverviewTab({
             </CardContent>
           </Card>
         )}
-        {totalPurchases != null && (
+        {canShowFinancial && totalPurchases != null && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Purchases (range)</CardTitle>
@@ -407,7 +429,7 @@ function ReportsOverviewTab({
             </CardContent>
           </Card>
         )}
-        {netMovement != null && (
+        {canShowFinancial && netMovement != null && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Net Movement (IN − OUT)</CardTitle>
@@ -420,7 +442,7 @@ function ReportsOverviewTab({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {salesVsPurchasesTrend.length > 0 && (
+        {canShowFinancial && salesVsPurchasesTrend.length > 0 && (
           <ChartCard
             title="Sales vs Purchases"
             subtitle="Trend for selected range"
@@ -520,7 +542,7 @@ function ReportsOverviewTab({
         )}
       </div>
 
-      {(stockValueByWarehouse.length > 0 || stockValueByCategory.length > 0) && (
+      {canShowFinancial && (stockValueByWarehouse.length > 0 || stockValueByCategory.length > 0) && (
         <div className="grid gap-4 md:grid-cols-2">
           {stockValueByWarehouse.length > 0 && (
             <ChartCard title="Stock value by warehouse" subtitle="Value by location" chartHeight={260}>
@@ -610,6 +632,36 @@ function ReportsOverviewTab({
             </CardContent>
           </Card>
         )}
+        {canShowFinancial && topSellingProducts.length > 0 && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Top selling (value)</CardTitle>
+              <Link href={`/dashboard/reports?tab=sales&${searchParams.toString()}`}>
+                <Button variant="ghost" size="sm">View all</Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Value</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {topSellingProducts.slice(0, 5).map((p, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{p.productName}</TableCell>
+                      <TableCell className="text-right">{p.quantity}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(p.value, currency)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
         {lowStockProducts.length > 0 && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -640,36 +692,6 @@ function ReportsOverviewTab({
             </CardContent>
           </Card>
         )}
-        {topSellingProducts.length > 0 && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Top selling products</CardTitle>
-              <Link href={`/dashboard/reports?tab=sales&${searchParams.toString()}`}>
-                <Button variant="ghost" size="sm">View all</Button>
-              </Link>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Value</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {topSellingProducts.slice(0, 5).map((p, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">{p.productName}</TableCell>
-                      <TableCell className="text-right">{p.quantity}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(p.value, currency)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   );
@@ -681,11 +703,13 @@ function ReportsInventoryTab({
   canExport,
   currency,
   onQueryChange,
+  canShowFinancial = true,
 }: {
   searchParams: URLSearchParams;
   canExport: boolean;
   currency: string;
   onQueryChange: (params: Record<string, string>) => void;
+  canShowFinancial?: boolean;
 }) {
   const router = useRouter();
   const [data, setData] = useState<{ rows: unknown[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } } | null>(null);
@@ -793,8 +817,8 @@ function ReportsInventoryTab({
                   <TableHead>Warehouse</TableHead>
                   <TableHead className="text-right">On Hand</TableHead>
                   <TableHead className="text-right">Reorder</TableHead>
-                  <TableHead className="text-right">Unit Cost</TableHead>
-                  <TableHead className="text-right">Stock Value</TableHead>
+                  {canShowFinancial && <TableHead className="text-right">Unit Cost</TableHead>}
+                  {canShowFinancial && <TableHead className="text-right">Stock Value</TableHead>}
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -807,8 +831,12 @@ function ReportsInventoryTab({
                     <TableCell>{r.warehouseName}</TableCell>
                     <TableCell className="text-right">{r.onHand}</TableCell>
                     <TableCell className="text-right">{r.reorderLevel ?? '—'}</TableCell>
-                    <TableCell className="text-right">{r.unitCost != null ? formatCurrency(r.unitCost, currency) : '—'}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(r.stockValue, currency)}</TableCell>
+                    {canShowFinancial && (
+                      <TableCell className="text-right">{r.unitCost != null ? formatCurrency(r.unitCost, currency) : '—'}</TableCell>
+                    )}
+                    {canShowFinancial && (
+                      <TableCell className="text-right">{formatCurrency(r.stockValue, currency)}</TableCell>
+                    )}
                     <TableCell>
                       {r.isLowStock ? <Badge variant="destructive">Low stock</Badge> : <Badge variant="secondary">OK</Badge>}
                     </TableCell>
@@ -842,6 +870,191 @@ function ReportsInventoryTab({
                 onClick={() => {
                   const p = new URLSearchParams(searchParams);
                   p.set('tab', 'inventory');
+                  p.set('page', String(pagination.page + 1));
+                  router.replace(`/dashboard/reports?${p.toString()}`, { scroll: false });
+                }}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --- Reorder Suggestions tab
+interface ReorderRow {
+  productId: string;
+  productName: string;
+  sku: string;
+  warehouseId: string;
+  warehouseName: string;
+  currentStock: number;
+  avgDailySales: number;
+  daysOfCover: number;
+  suggestedReorderQty: number;
+  predictedStockoutDate: string | null;
+}
+
+function ReportsReorderSuggestionsTab({
+  searchParams,
+  canExport,
+  onQueryChange,
+}: {
+  searchParams: URLSearchParams;
+  canExport: boolean;
+  onQueryChange: (params: Record<string, string>) => void;
+}) {
+  const router = useRouter();
+  const [data, setData] = useState<{ rows: ReorderRow[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const warehouseId = searchParams.get('warehouseId') ?? '';
+  const category = searchParams.get('category') ?? searchParams.get('categoryId') ?? '';
+  const q = searchParams.get('q') ?? '';
+  const lowDaysOnly = searchParams.get('lowDaysOnly') === 'true';
+  const page = parseInt(searchParams.get('page') ?? '1', 10);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set('tab', TAB_REORDER_SUGGESTIONS);
+    params.set('page', page.toString());
+    params.set('pageSize', '20');
+    if (warehouseId) params.set('warehouseId', warehouseId);
+    if (category) params.set('category', category);
+    if (q) params.set('q', q);
+    if (lowDaysOnly) params.set('lowDaysOnly', 'true');
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/reports/reorder-suggestions?${params.toString()}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load reorder suggestions');
+        return res.json();
+      })
+      .then((d) => {
+        if (!cancelled)
+          setData({
+            rows: d.rows ?? [],
+            pagination: d.pagination ?? { page: 1, pageSize: 20, total: 0, totalPages: 1 },
+          });
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [searchParams.toString(), page, warehouseId, category, q, lowDaysOnly]);
+
+  const handleExport = () => {
+    const p = new URLSearchParams(searchParams);
+    p.set('tab', TAB_REORDER_SUGGESTIONS);
+    if (warehouseId) p.set('warehouseId', warehouseId);
+    if (category) p.set('category', category);
+    if (q) p.set('q', q);
+    if (lowDaysOnly) p.set('lowDaysOnly', 'true');
+    window.open(`/api/reports/reorder-suggestions/export?${p.toString()}`, '_blank');
+  };
+
+  if (error) return <ErrorState message={error} onRetry={() => setError(null)} />;
+
+  const rows = data?.rows ?? [];
+  const pagination = data?.pagination ?? { page: 1, pageSize: 20, total: 0, totalPages: 1 };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onQueryChange({ tab: TAB_REORDER_SUGGESTIONS, lowDaysOnly: lowDaysOnly ? '' : 'true' })}
+        >
+          {lowDaysOnly ? 'Show all' : 'Low days only (<14)'}
+        </Button>
+        {canExport && (
+          <Button size="sm" variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-1" />
+            Export CSV
+          </Button>
+        )}
+      </div>
+      {loading && !data ? (
+        <ReportsSkeleton />
+      ) : rows.length === 0 ? (
+        <EmptyState message="No reorder suggestions for selected filters. Run Recalculate metrics if needed." />
+      ) : (
+        <>
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Warehouse</TableHead>
+                  <TableHead className="text-right">Current Stock</TableHead>
+                  <TableHead className="text-right">Avg Daily Sales</TableHead>
+                  <TableHead className="text-right">Days of Cover</TableHead>
+                  <TableHead className="text-right">Suggested Reorder Qty</TableHead>
+                  <TableHead>Predicted Stockout Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => {
+                  const isCritical = r.daysOfCover < 7;
+                  const isWarning = r.daysOfCover < 14 && !isCritical;
+                  const badgeClass = isCritical
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+                    : isWarning
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                      : 'bg-muted text-muted-foreground';
+                  return (
+                    <TableRow key={`${r.productId}-${r.warehouseId}`}>
+                      <TableCell className="font-medium">{r.productName}</TableCell>
+                      <TableCell>{r.warehouseName}</TableCell>
+                      <TableCell className="text-right">{r.currentStock}</TableCell>
+                      <TableCell className="text-right">{r.avgDailySales.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">
+                        <span className={badgeClass + ' inline-flex rounded-full px-2 py-0.5 text-xs font-medium'}>
+                          {r.daysOfCover.toFixed(1)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">{Math.round(r.suggestedReorderQty)}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {r.predictedStockoutDate ? formatDate(r.predictedStockoutDate) : '—'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Page {pagination.page} of {pagination.totalPages} ({pagination.total} items)
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pagination.page <= 1}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('tab', TAB_REORDER_SUGGESTIONS);
+                  p.set('page', String(pagination.page - 1));
+                  router.replace(`/dashboard/reports?${p.toString()}`, { scroll: false });
+                }}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pagination.page >= pagination.totalPages}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('tab', TAB_REORDER_SUGGESTIONS);
                   p.set('page', String(pagination.page + 1));
                   router.replace(`/dashboard/reports?${p.toString()}`, { scroll: false });
                 }}

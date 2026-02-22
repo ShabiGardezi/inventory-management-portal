@@ -35,6 +35,9 @@ export interface MovementRow {
   product: { id: string; name: string; sku: string };
   warehouse: { id: string; name: string; code: string | null };
   createdBy: { id: string; name: string | null; email: string } | null;
+  batch?: { id: string; batchNumber: string; expiryDate: Date | null } | null;
+  serialCount?: number | null;
+  productSerials?: { serialNumber: string }[];
 }
 
 export interface ListMovementsResult {
@@ -98,6 +101,7 @@ export async function listMovements(
         product: { select: { id: true, name: true, sku: true } },
         warehouse: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, name: true, email: true } },
+        batch: { select: { id: true, batchNumber: true, expiryDate: true } },
       },
     }),
     prisma.stockMovement.count({ where }),
@@ -119,6 +123,8 @@ export async function listMovements(
       product: m.product,
       warehouse: m.warehouse,
       createdBy: m.createdBy,
+      batch: m.batch ? { id: m.batch.id, batchNumber: m.batch.batchNumber, expiryDate: m.batch.expiryDate } : null,
+      serialCount: m.serialCount ?? null,
     })),
     total,
     page,
@@ -136,6 +142,8 @@ export async function getMovementById(
       product: { select: { id: true, name: true, sku: true } },
       warehouse: { select: { id: true, name: true, code: true } },
       createdBy: { select: { id: true, name: true, email: true } },
+      batch: { select: { id: true, batchNumber: true, expiryDate: true, mfgDate: true } },
+      productSerials: { select: { serialNumber: true } },
     },
   });
   if (!m) return null;
@@ -154,6 +162,9 @@ export async function getMovementById(
     product: m.product,
     warehouse: m.warehouse,
     createdBy: m.createdBy,
+    batch: m.batch ? { id: m.batch.id, batchNumber: m.batch.batchNumber, expiryDate: m.batch.expiryDate } : null,
+    serialCount: m.serialCount ?? null,
+    productSerials: m.productSerials.map((s) => ({ serialNumber: s.serialNumber })),
   };
 }
 
@@ -175,6 +186,7 @@ export async function listMovementsForExport(
       product: { select: { id: true, name: true, sku: true } },
       warehouse: { select: { id: true, name: true, code: true } },
       createdBy: { select: { id: true, name: true, email: true } },
+      batch: { select: { id: true, batchNumber: true, expiryDate: true } },
     },
   });
 
@@ -193,5 +205,7 @@ export async function listMovementsForExport(
     product: m.product,
     warehouse: m.warehouse,
     createdBy: m.createdBy,
+    batch: m.batch ? { id: m.batch.id, batchNumber: m.batch.batchNumber, expiryDate: m.batch.expiryDate } : null,
+    serialCount: m.serialCount ?? null,
   }));
 }

@@ -47,6 +47,29 @@ These rules are enforced in code and must not be bypassed.
   - `StockService.decreaseStock()` with `referenceType: 'SALE'` and optional referenceId/referenceNumber.
 - Sales do **not** affect stock until a confirm action is performed. `confirmSale` respects `allowNegativeStock` unless overridden by the caller.
 
+### 7. Batch tracking (trackBatches)
+
+- **Rule:** When a product has `trackBatches: true`, every IN (receive, adjust increase, transfer IN) must supply either an existing `batchId` or `batchInput.batchNumber` (and optionally expiryDate, mfgDate). The system find-or-creates a batch per (productId, batchNumber).
+- **Rule:** Every OUT (sale confirm, adjust decrease, transfer OUT) for a batch-tracked product must supply `batchId` so the correct balance (productId, warehouseId, batchId) is decreased.
+- **Rule:** `stock_balances` has one row per (productId, warehouseId, batchId); `batchId` may be null for non-batch (legacy) balances. Movements carry `batchId` so ledger sums are per (productId, warehouseId, batchId).
+
+### 8. Serial tracking (trackSerials)
+
+- **Rule:** When a product has `trackSerials: true`, IN operations may optionally pass `serialNumbers: string[]`; each serial creates a `ProductSerial` row with status IN_STOCK, linked to warehouse and optional batch. Serial numbers are unique per product globally.
+- **Rule:** OUT operations (sale confirm, transfer OUT, adjust decrease) for serial-tracked products **must** pass `serialNumbers` with length equal to quantity; the system marks those serials as SOLD (or DAMAGED/RETURNED per `serialDisposition`) and links them to the movement.
+- **Rule:** Transfer of serial-tracked stock updates the serials’ `warehouseId` to the destination; the same serials remain IN_STOCK.
+
+---
+
+## Reorder & Metrics (Smart Reorder Engine)
+
+- **Rule:** Reorder metrics (avg daily sales, days of cover, suggested reorder qty, predicted stockout date) are computed by `InventoryMetricsService` and stored in `inventory_metrics`. The dashboard and Reports **read** from this table; they do **not** recalculate from movements on each request.
+- **Rule:** **Avg daily sales** = total quantity of OUT movements with `referenceType = 'SALE'` in the lookback window (configurable, default 30 days), divided by the number of days in that window. Only movements in the indexed `createdAt` range are summed; no full-table scan of `stock_movements`.
+- **Rule:** **Days of cover** = current stock (sum of `stock_balances.quantity` for the product/warehouse) ÷ avg daily sales. If avg daily sales is 0, days of cover is 0 and predicted stockout date is not set.
+- **Rule:** **Predicted stockout date** = now + (days of cover in days), when days of cover > 0.
+- **Rule:** **Suggested reorder qty** = max(0, (leadTimeDays × avgDailySales + safetyStock) − currentStock). Lead time and safety stock come from `reorder_policies` for that (productId, warehouseId). If a `ReorderPolicy` has `maxStock` set, suggested reorder qty is capped so it does not exceed `maxStock`. If there is no reorder policy, suggested reorder qty is 0.
+- **Rule:** Metrics are recomputed for affected (productId, warehouseId) **after** sale confirm, purchase receive, or stock adjust (via API route calling `recomputeForProductWarehouse`). A full recompute can be run manually (e.g. `POST /api/reports/recompute-metrics` or "Recalculate" in Reports) via `recomputeAllMetrics()`.
+
 ---
 
 ## Audit Logging
@@ -56,6 +79,26 @@ These rules are enforced in code and must not be bypassed.
   - Sensitive user/role changes (e.g. role assign, user disable) — where implemented in the app.
   - Settings updates — where implemented.
 - **Rule:** Audit metadata must **not** contain passwords, tokens, or API keys; sensitive keys are redacted before storing (see `auditService` redactMetadata).
+
+---
+
+## Approval Workflow
+
+- **Rule:** When an **approval policy** is enabled for an entity type (PURCHASE_RECEIVE, SALE_CONFIRM, STOCK_ADJUSTMENT, STOCK_TRANSFER), the corresponding action (receive, confirm, adjust, transfer) **must not** execute stock mutations until an approval request is **approved** by a user with the reviewer permission (default `approvals.review`).
+- **Rule:** On “Receive” / “Confirm” / “Adjust” / “Transfer” when policy is enabled: the system creates an **approval_request** (status PENDING) and the linked entity (e.g. PurchaseReceiveRequest, Sale, StockAdjustment, StockTransfer) is set to **PENDING_APPROVAL**. No `stock_movements` or balance updates occur at this step.
+- **Rule:** Only when an approval request is **approved** does the system execute the underlying action (via `StockService`) in a single transaction: create movements, update balances, set entity status to RECEIVED/CONFIRMED/APPLIED, and write an audit log for “execution completed.” Execution is **idempotent**: approving an already-approved request does not run the action again.
+- **Rule:** When an approval request is **rejected**, the request status is set to REJECTED and the linked entity status is set to REJECTED (or equivalent). No stock mutations occur.
+- **Rule:** Cancellation (optional) is allowed for the requester or a user with `approvals.manage`; the request and entity are set to CANCELLED (Sale to REJECTED). No stock mutations.
+
+### Status lifecycles (approval-related)
+
+| Entity | Draft / Initial | After submit (policy on) | After approve | After reject |
+|--------|------------------|---------------------------|---------------|--------------|
+| **ApprovalRequest** | — | PENDING | APPROVED | REJECTED |
+| **PurchaseReceiveRequest** | DRAFT | PENDING_APPROVAL | RECEIVED | REJECTED |
+| **Sale** | DRAFT | PENDING_APPROVAL | CONFIRMED | REJECTED |
+| **StockAdjustment** | DRAFT | PENDING_APPROVAL | APPLIED | REJECTED |
+| **StockTransfer** | DRAFT | PENDING_APPROVAL | APPLIED | REJECTED |
 
 ---
 
@@ -78,5 +121,9 @@ These rules are enforced in code and must not be bypassed.
 | allowNegativeStock | StockService.decreaseStock / transferStock; settings read in service/callers |
 | Purchase receive → IN only via service | receivePurchase / increaseStock(PURCHASE) |
 | Sale confirm → OUT only via service | confirmSale / decreaseStock(SALE) |
+| Batch tracking: IN with batchId/batchInput, OUT with batchId | StockService increaseStock / decreaseStock / transferStock; balances keyed by (productId, warehouseId, batchId) |
+| Serial tracking: IN optional serialNumbers, OUT required serialNumbers | StockService; ProductSerial status and warehouseId updated |
+| Reorder metrics: formula and when to recalc | InventoryMetricsService; API routes after confirm/receive/adjust; manual recompute endpoint |
 | Audit for stock/sensitive actions | Stock repository + auditService; other services where applicable |
 | Permission-based RBAC | lib/rbac + API + dashboard/report services |
+| Approval: no stock until approved; idempotent execution; reject/cancel no stock | ApprovalService; API receive/confirm/adjust/transfer + approvals approve/reject |

@@ -540,3 +540,69 @@ export async function getInventoryExport(
   });
   return result.rows;
 }
+
+export interface ReorderSuggestionsListQuery {
+  warehouseId?: string;
+  productId?: string;
+  category?: string;
+  q?: string;
+  lowDaysOnly?: string;
+  page?: string;
+  pageSize?: string;
+  sort?: string;
+  order?: string;
+}
+
+export async function getReorderSuggestionsReport(
+  user: UserWithPermissions,
+  query: ReorderSuggestionsListQuery
+): Promise<{
+  rows: reportRepo.ReorderSuggestionsRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}> {
+  if (!userHasAny(user, REPORT_READ) && !userHasAny(user, INVENTORY_READ)) {
+    return { rows: [], total: 0, page: 1, pageSize: 20 };
+  }
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? '20', 10)));
+  const sort = (
+    ['daysOfCover', 'suggestedReorderQty', 'productName', 'warehouseName', 'avgDailySales'] as const
+  ).includes(query.sort as 'daysOfCover')
+    ? (query.sort as reportRepo.ReorderSuggestionsParams['sort'])
+    : 'daysOfCover';
+  const order = query.order === 'asc' ? 'asc' : 'desc';
+
+  return reportRepo.getReorderSuggestionsList({
+    warehouseId: query.warehouseId,
+    productId: query.productId,
+    category: query.category,
+    q: query.q,
+    lowDaysOnly: query.lowDaysOnly === 'true',
+    page,
+    pageSize,
+    sort,
+    order,
+  });
+}
+
+export async function getReorderSuggestionsExport(
+  user: UserWithPermissions,
+  query: Omit<ReorderSuggestionsListQuery, 'page' | 'pageSize'>
+): Promise<reportRepo.ReorderSuggestionsRow[]> {
+  if (!userHasAny(user, EXPORT_READ) && !userHasAny(user, REPORT_READ) && !userHasAny(user, INVENTORY_READ))
+    return [];
+  const result = await reportRepo.getReorderSuggestionsList({
+    warehouseId: query.warehouseId,
+    productId: query.productId,
+    category: query.category,
+    q: query.q,
+    lowDaysOnly: query.lowDaysOnly === 'true',
+    page: 1,
+    pageSize: 5000,
+    sort: 'daysOfCover',
+    order: 'asc',
+  });
+  return result.rows;
+}

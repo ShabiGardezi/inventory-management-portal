@@ -800,6 +800,139 @@ export async function getAuditList(
   return { rows, total, page, pageSize };
 }
 
+/** Reorder suggestions: from InventoryMetrics + current stock from StockBalance */
+export interface ReorderSuggestionsParams {
+  warehouseId?: string;
+  productId?: string;
+  category?: string;
+  q?: string;
+  lowDaysOnly?: boolean; // filter daysOfCover < 14
+  page: number;
+  pageSize: number;
+  sort?: 'daysOfCover' | 'suggestedReorderQty' | 'productName' | 'warehouseName' | 'avgDailySales';
+  order?: 'asc' | 'desc';
+}
+
+export interface ReorderSuggestionsRow {
+  productId: string;
+  productName: string;
+  sku: string;
+  warehouseId: string;
+  warehouseName: string;
+  currentStock: number;
+  avgDailySales: number;
+  daysOfCover: number;
+  suggestedReorderQty: number;
+  predictedStockoutDate: Date | null;
+}
+
+export interface ReorderSuggestionsResult {
+  rows: ReorderSuggestionsRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getReorderSuggestionsList(
+  params: ReorderSuggestionsParams,
+  deps?: ReportRepoDeps
+): Promise<ReorderSuggestionsResult> {
+  const db = getPrisma(deps);
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 20));
+
+  const productWhere: Prisma.ProductWhereInput = { isActive: true };
+  if (params.category) productWhere.category = params.category;
+  if (params.q?.trim()) {
+    const q = params.q.trim();
+    productWhere.OR = [
+      { name: { contains: q, mode: 'insensitive' } },
+      { sku: { contains: q, mode: 'insensitive' } },
+    ];
+  }
+  const whereMetric: Prisma.InventoryMetricsWhereInput = {
+    product: productWhere,
+    warehouse: { isActive: true },
+  };
+  if (params.warehouseId) whereMetric.warehouseId = params.warehouseId;
+  if (params.productId) whereMetric.productId = params.productId;
+  if (params.lowDaysOnly) whereMetric.daysOfCover = { lt: 14 };
+
+  const metrics = await db.inventoryMetrics.findMany({
+    where: whereMetric,
+    include: {
+      product: { select: { id: true, name: true, sku: true } },
+      warehouse: { select: { id: true, name: true } },
+    },
+  });
+
+  const pairKeys = metrics.map((m) => ({ productId: m.productId, warehouseId: m.warehouseId }));
+  const stockByPair = new Map<string, number>();
+  if (pairKeys.length > 0) {
+    const balances = await db.stockBalance.findMany({
+      where: {
+        OR: pairKeys.map((k) => ({ productId: k.productId, warehouseId: k.warehouseId })),
+      },
+      select: { productId: true, warehouseId: true, quantity: true },
+    });
+    for (const b of balances) {
+      const key = `${b.productId}:${b.warehouseId}`;
+      stockByPair.set(key, (stockByPair.get(key) ?? 0) + Number(b.quantity));
+    }
+  }
+
+  let rows: ReorderSuggestionsRow[] = metrics.map((m) => {
+    const key = `${m.productId}:${m.warehouseId}`;
+    const currentStock = stockByPair.get(key) ?? 0;
+    return {
+      productId: m.productId,
+      productName: m.product.name,
+      sku: m.product.sku,
+      warehouseId: m.warehouseId,
+      warehouseName: m.warehouse.name,
+      currentStock,
+      avgDailySales: Number(m.avgDailySales),
+      daysOfCover: Number(m.daysOfCover),
+      suggestedReorderQty: Number(m.suggestedReorderQty),
+      predictedStockoutDate: m.predictedStockoutDate,
+    };
+  });
+
+  const sortKey = params.sort ?? 'daysOfCover';
+  const order = params.order ?? 'asc';
+  rows.sort((a, b) => {
+    let va: string | number;
+    let vb: string | number;
+    if (sortKey === 'daysOfCover') {
+      va = a.daysOfCover;
+      vb = b.daysOfCover;
+    } else if (sortKey === 'suggestedReorderQty') {
+      va = a.suggestedReorderQty;
+      vb = b.suggestedReorderQty;
+    } else if (sortKey === 'productName') {
+      va = a.productName;
+      vb = b.productName;
+    } else if (sortKey === 'warehouseName') {
+      va = a.warehouseName;
+      vb = b.warehouseName;
+    } else if (sortKey === 'avgDailySales') {
+      va = a.avgDailySales;
+      vb = b.avgDailySales;
+    } else {
+      va = a.daysOfCover;
+      vb = b.daysOfCover;
+    }
+    const cmp = typeof va === 'string' ? String(va).localeCompare(String(vb)) : va - (vb as number);
+    return order === 'asc' ? cmp : -cmp;
+  });
+
+  const total = rows.length;
+  const start = (page - 1) * pageSize;
+  rows = rows.slice(start, start + pageSize);
+
+  return { rows, total, page, pageSize };
+}
+
 /** Distinct product category names for filter dropdown */
 export async function getDistinctCategories(deps?: ReportRepoDeps): Promise<string[]> {
   const db = getPrisma(deps);

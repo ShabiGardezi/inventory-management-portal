@@ -55,6 +55,7 @@ export interface DashboardCharts {
 
 export interface DashboardTables {
   lowStock?: Awaited<ReturnType<typeof repo.getLowStockProducts>>;
+  likelyToStockOut?: Awaited<ReturnType<typeof repo.getLikelyToStockOut>>;
   recentMovements?: Awaited<ReturnType<typeof repo.getRecentMovements>>;
   recentSales?: Awaited<ReturnType<typeof repo.getRecentSales>>;
   recentPurchases?: Awaited<ReturnType<typeof repo.getRecentPurchases>>;
@@ -163,6 +164,7 @@ export async function getDashboardData(
     tables.lowStock = await repo.getLowStockProducts(limit);
   }
   if (canStockRead) {
+    tables.likelyToStockOut = await repo.getLikelyToStockOut(limit);
     tables.recentMovements = await repo.getRecentMovements(limit);
     if (isAdmin || isManager) {
       tables.recentSales = await repo.getRecentSales(limit);

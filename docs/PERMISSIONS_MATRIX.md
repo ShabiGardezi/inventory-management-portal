@@ -44,6 +44,11 @@ Permissions are stored by **name** (e.g. `product:read`). The app checks these n
 ### Audit
 - `audit:read`, `audit.read` — View audit logs
 
+### Approvals
+- `approvals.read` — View approval requests (list and detail)
+- `approvals.review` — Approve or reject approval requests (required to execute pending receive/confirm/adjust/transfer)
+- `approvals.manage` — Manage approval policies (Settings → Approval Policies) and cancel any request
+
 ### Settings
 - `settings.read`, `settings.update`
 
@@ -66,6 +71,9 @@ A **✓** means the role has that permission by default (from seed). Empty = no.
 | warehouse:* | ✓ | ✓ | — | read |
 | stock:* | ✓ | ✓ | read, create, transfer | read |
 | stock:adjust | ✓ | ✓ | — | — |
+| approvals.read | ✓ | ✓ | — | ✓ |
+| approvals.review | ✓ | ✓ | — | — |
+| approvals.manage | ✓ | ✓ | — | — |
 | user:* / users.* | ✓ | ✓ | — | read |
 | role:* / roles.* | ✓ | ✓ | — | read |
 | audit.read / audit:read | ✓ | ✓ | — | ✓ |
@@ -90,6 +98,7 @@ The sidebar uses **required permissions per nav item**. A nav item is shown if t
 | Products | `product:read`, `inventory:read` |
 | Warehouses | `warehouse:read` |
 | Stock Movements | `inventory:read`, `stock:read` |
+| Approvals | `approvals.read`, `approvals.review` |
 | Purchases | `purchase:read`, `purchase.read` |
 | Sales | `sales:read`, `sales.read` |
 | Reports | `reports.read`, `reports:read` |

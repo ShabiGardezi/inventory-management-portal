@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 
 const productSchema = z.object({
@@ -35,6 +36,8 @@ const productSchema = z.object({
     .nullable(),
   reorderLevel: z.number().int().min(0, 'Reorder level must be 0 or more').optional().nullable(),
   isActive: z.boolean().default(true),
+  trackBatches: z.boolean().default(false),
+  trackSerials: z.boolean().default(false),
 });
 
 type ProductFormData = z.infer<typeof productSchema>;
@@ -54,6 +57,8 @@ export function CreateProductDialog({ children, onSuccess }: CreateProductDialog
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
+    setValue,
   } = useForm<ProductFormData>({
     resolver: zodResolver(productSchema) as Resolver<ProductFormData>,
     defaultValues: {
@@ -61,6 +66,8 @@ export function CreateProductDialog({ children, onSuccess }: CreateProductDialog
       isActive: true,
       price: null,
       reorderLevel: null,
+      trackBatches: false,
+      trackSerials: false,
     },
   });
 
@@ -219,6 +226,28 @@ export function CreateProductDialog({ children, onSuccess }: CreateProductDialog
                 <p className="text-sm text-destructive">{errors.reorderLevel.message}</p>
               )}
               <p className="text-xs text-muted-foreground">Alert when stock falls below this</p>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t pt-4">
+            <Label>Tracking</Label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={watch('trackBatches')}
+                  onCheckedChange={(checked) => setValue('trackBatches', !!checked)}
+                />
+                <span>Track Batches</span>
+              </label>
+              <p className="text-xs text-muted-foreground pl-6">Expiry / lot tracking per batch</p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={watch('trackSerials')}
+                  onCheckedChange={(checked) => setValue('trackSerials', !!checked)}
+                />
+                <span>Track Serials</span>
+              </label>
+              <p className="text-xs text-muted-foreground pl-6">Unique serial number per unit</p>
             </div>
           </div>
 

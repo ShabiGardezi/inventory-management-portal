@@ -29,11 +29,12 @@
 ### C) Query performance and indexes (Prisma schema)
 
 - **stock_balances:** `@@unique([productId, warehouseId])`; `@@index([productId])`, `@@index([warehouseId])`, `@@index([available])`. Sufficient for lookups and low-stock filters.
-- **stock_movements:** `@@index([warehouseId, createdAt])`, `@@index([productId, createdAt])`, `@@index([movementType, createdAt])`, plus single-column indexes on productId, warehouseId, movementType, createdAt, referenceNumber, createdById. Sufficient for list, filters, and report aggregations.
+- **stock_movements:** `@@index([warehouseId, createdAt])`, `@@index([productId, createdAt])`, `@@index([movementType, createdAt])`, plus single-column indexes. **Added for metrics engine:** `@@index([productId, warehouseId, movementType, referenceType, createdAt])` so the smart reorder metrics query (OUT + SALE in date range per product/warehouse) is index-backed; no full-table scan.
 - **products:** `@@unique` on `sku`; indexes on sku, name, category, isActive.
 - **audit_logs:** Indexes on userId, action, resource, resourceId, createdAt.
+- **inventory_metrics:** `@@unique([productId, warehouseId])`, `@@index([productId, warehouseId])`, `@@index([predictedStockoutDate])` for dashboard and reorder reports.
 
-No separate “sales” or “purchases” tables; sales/purchases are represented by movements with `referenceType` and optional `referenceId`/`referenceNumber`. Existing indexes support current report queries. Optional future addition: `@@index([referenceType, createdAt])` on `stock_movements` if report filters by referenceType become heavy.
+No separate “sales” or “purchases” tables; sales/purchases are represented by movements with `referenceType` and optional `referenceId`/`referenceNumber`. The composite index on `stock_movements (productId, warehouseId, movementType, referenceType, createdAt)` ensures the metrics engine's sales aggregation is index-backed.
 
 ### D) Caching strategy (Next.js + client)
 
@@ -57,6 +58,13 @@ No separate “sales” or “purchases” tables; sales/purchases are represent
 - **Dashboard:** Uses `dashboardRepo`: product/warehouse counts, total stock value (balances + product price), low stock count (balances), today’s sales/purchases (movement aggregates). No full-table scan; filters and indexes used.
 - **Reports:** Use `reportRepo` and `reportService`: stock value and low stock from balances; sales/purchases and movement trends from movements with date range and optional warehouse/category. Pagination and limits applied on list endpoints.
 - **Optimization:** No change required. If an endpoint becomes slow, add selective `select` fields, tighten `where` clauses, and consider `referenceType`+`createdAt` index on `stock_movements` for reference-type report filters.
+
+### G) Precomputed reorder metrics (inventory_metrics)
+
+- **Why we store precomputed metrics:** The smart reorder engine needs avg daily sales, days of cover, suggested reorder qty, and predicted stockout date per (product, warehouse). Computing these on every dashboard or report load would require aggregating `stock_movements` (OUT + SALE in date range) and summing `stock_balances` for every product/warehouse pair — expensive and unnecessary for read-heavy UI.
+- **Design:** `InventoryMetricsService` computes these values when stock changes (after sale confirm, purchase receive, stock adjust) or on manual "Recalculate," and **upserts** into `inventory_metrics`. The dashboard "Likely to stock out" card and the Reports "Reorder Suggestions" report **read** from `inventory_metrics` only. No heavy recalculation on render.
+- **Query discipline:** When computing metrics, the service uses: (1) **Sales:** `stock_movements` filtered by `productId`, `warehouseId`, `movementType: 'OUT'`, `referenceType: 'SALE'`, and `createdAt` in a bounded range (lookback days). The composite index `(productId, warehouseId, movementType, referenceType, createdAt)` ensures this query is index-backed; no full scan. (2) **Current stock:** `stock_balances` aggregate by `productId`, `warehouseId` (indexed). (3) **Reorder policy:** `reorder_policies` by unique `(productId, warehouseId)`.
+- **No performance regression:** All metrics queries are limited by indexed columns and date range; the added composite index on `stock_movements` guarantees the sales aggregation does not scan the entire table.
 
 ---
 
@@ -99,10 +107,9 @@ No `revalidatePath` was added because data is loaded client-side via fetch; forc
 
 ## 5. Query/Index Changes and Why
 
-- **No schema migrations added.** Existing indexes are sufficient:
-  - `stock_balances`: unique (productId, warehouseId); indexes support by-product, by-warehouse, and by-availability.
-  - `stock_movements`: composite indexes (warehouseId+createdAt), (productId+createdAt), (movementType+createdAt) support list and report queries.
-- **Optional future index:** If report filters often use `referenceType` (e.g. “sales only”, “purchases only”), add `@@index([referenceType, createdAt])` on `StockMovement` and create a migration.
+- **stock_balances:** unique (productId, warehouseId); no change.
+- **stock_movements:** **Added** `@@index([productId, warehouseId, movementType, referenceType, createdAt])` so the metrics engine's sales aggregation is index-backed. Apply via `prisma migrate dev` or `db push`.
+- **inventory_metrics:** Existing indexes support dashboard and reorder report reads.
 
 ---
 

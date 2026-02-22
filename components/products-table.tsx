@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { EditProductDialog, type ProductForEdit } from '@/components/edit-product-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pencil, Trash2, BarChart3 } from 'lucide-react';
 
 interface Product {
   id: string;
@@ -48,6 +48,8 @@ interface Product {
   price: number | null;
   reorderLevel: number | null;
   isActive: boolean;
+  trackBatches: boolean;
+  trackSerials: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +102,10 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showMetricsColumns, setShowMetricsColumns] = useState(false);
+  const [metricsByProductId, setMetricsByProductId] = useState<
+    Record<string, { minDaysOfCover: number; suggestedReorderQty: number }>
+  >({});
 
   const fetchProducts = async (page: number, limit: number, searchTerm: string) => {
     try {
@@ -148,6 +154,21 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
   }, [filterLowStock]);
+
+  useEffect(() => {
+    if (!showMetricsColumns || data.length === 0) {
+      if (!showMetricsColumns) setMetricsByProductId({});
+      return;
+    }
+    const ids = data.map((p) => p.id);
+    const qs = new URLSearchParams({ productIds: ids.join(',') });
+    fetch(`/api/inventory-metrics/by-products?${qs}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load metrics'))))
+      .then((body: { metrics?: Record<string, { minDaysOfCover: number; suggestedReorderQty: number }> }) => {
+        setMetricsByProductId(body.metrics ?? {});
+      })
+      .catch(() => setMetricsByProductId({}));
+  }, [showMetricsColumns, data]);
 
   const refreshProducts = useCallback(() => {
     fetchProducts(pagination.page, pagination.limit, search);
@@ -273,6 +294,38 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
           return v != null ? Number(v) : <span className="text-muted-foreground">—</span>;
         },
       },
+      ...(showMetricsColumns
+        ? [
+            {
+              id: 'daysOfCover',
+              header: 'Days of cover',
+              cell: ({ row }: { row: { original: Product } }) => {
+                const m = metricsByProductId[row.original.id];
+                if (m == null) return <span className="text-muted-foreground">—</span>;
+                const d = m.minDaysOfCover;
+                const isCritical = d < 7;
+                const isWarning = d < 14 && !isCritical;
+                const className = isCritical
+                  ? 'text-red-600 dark:text-red-400 font-medium'
+                  : isWarning
+                    ? 'text-amber-600 dark:text-amber-400 font-medium'
+                    : '';
+                return <span className={className}>{Number.isFinite(d) ? d.toFixed(1) : '—'}</span>;
+              },
+            } as ColumnDef<Product>,
+            {
+              id: 'suggestedReorder',
+              header: 'Suggested reorder',
+              cell: ({ row }: { row: { original: Product } }) => {
+                const m = metricsByProductId[row.original.id];
+                if (m == null) return <span className="text-muted-foreground">—</span>;
+                const q = m.suggestedReorderQty;
+                const className = q > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : '';
+                return <span className={className}>{Number.isFinite(q) ? Math.round(q) : '—'}</span>;
+              },
+            } as ColumnDef<Product>,
+          ]
+        : []),
       {
         accessorKey: 'isActive',
         header: 'Status',
@@ -288,6 +341,29 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
             >
               {isActive ? 'Active' : 'Inactive'}
             </span>
+          );
+        },
+      },
+      {
+        id: 'tracking',
+        header: 'Tracking',
+        cell: ({ row }: { row: { original: Product } }) => {
+          const p = row.original;
+          const badges: string[] = [];
+          if (p.trackBatches) badges.push('Batch');
+          if (p.trackSerials) badges.push('Serial');
+          if (badges.length === 0) return <span className="text-muted-foreground">—</span>;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {badges.map((b) => (
+                <span
+                  key={b}
+                  className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"
+                >
+                  {b}
+                </span>
+              ))}
+            </div>
           );
         },
       },
@@ -338,7 +414,7 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
           ]
         : []),
     ],
-    [canUpdate, canDelete]
+    [canUpdate, canDelete, showMetricsColumns, metricsByProductId]
   );
 
   const table = useReactTable({
@@ -394,6 +470,15 @@ export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
             }}
             className="max-w-sm"
           />
+          <Button
+            variant={showMetricsColumns ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowMetricsColumns((v) => !v)}
+            title="Toggle Days of cover and Suggested reorder columns"
+          >
+            <BarChart3 className="h-4 w-4 mr-1.5" />
+            Reorder metrics
+          </Button>
           {showBulkDelete && (
             <Button
               variant="destructive"

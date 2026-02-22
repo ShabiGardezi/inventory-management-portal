@@ -16,6 +16,8 @@ const updateProductSchema = z.object({
   price: z.number().positive().optional().nullable(),
   reorderLevel: z.number().int().min(0).optional().nullable(),
   isActive: z.boolean().optional(),
+  trackBatches: z.boolean().optional(),
+  trackSerials: z.boolean().optional(),
 });
 
 export async function GET(
@@ -76,6 +78,8 @@ export async function PATCH(
         ...(data.price !== undefined && { price: data.price }),
         ...(data.reorderLevel !== undefined && { reorderLevel: data.reorderLevel }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.trackBatches !== undefined && { trackBatches: data.trackBatches }),
+        ...(data.trackSerials !== undefined && { trackSerials: data.trackSerials }),
       },
     });
     revalidateTag('products');

@@ -11,8 +11,17 @@ export function createTestPrisma(): PrismaClient {
 /** FK-safe order for truncate/deleteMany (children first). */
 const TRUNCATE_ORDER = [
   'auditLog',
+  'productSerial',
   'stockMovement',
   'stockBalance',
+  'inventoryMetrics',
+  'reorderPolicy',
+  'approvalRequest',
+  'stockAdjustment',
+  'stockTransfer',
+  'purchaseReceiveRequest',
+  'approvalPolicy',
+  'batch',
   'userRole',
   'rolePermission',
   'userSettings',
