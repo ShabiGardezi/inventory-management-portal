@@ -11,6 +11,7 @@ const PERMISSIONS: Array<{
   { name: 'product:read', resource: 'product', action: 'read', description: 'View products', module: 'Products' },
   { name: 'product:update', resource: 'product', action: 'update', description: 'Update products', module: 'Products' },
   { name: 'product:delete', resource: 'product', action: 'delete', description: 'Delete products', module: 'Products' },
+  { name: 'product:import', resource: 'product', action: 'import', description: 'Bulk import products from CSV/Excel', module: 'Products' },
   { name: 'warehouse:create', resource: 'warehouse', action: 'create', description: 'Create warehouses', module: 'Warehouses' },
   { name: 'warehouse:read', resource: 'warehouse', action: 'read', description: 'View warehouses', module: 'Warehouses' },
   { name: 'warehouse:update', resource: 'warehouse', action: 'update', description: 'Update warehouses', module: 'Warehouses' },

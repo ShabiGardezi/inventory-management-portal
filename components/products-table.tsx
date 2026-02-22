@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import {
   useReactTable,
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   getFilteredRowModel,
-  ColumnDef,
+  type ColumnDef,
   flexRender,
+  type RowSelectionState,
 } from '@tanstack/react-table';
 import {
   Table,
@@ -21,7 +23,20 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { EditProductDialog, type ProductForEdit } from '@/components/edit-product-dialog';
+import { useToast } from '@/hooks/use-toast';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pencil, Trash2 } from 'lucide-react';
 
 interface Product {
   id: string;
@@ -47,9 +62,27 @@ interface ProductsResponse {
   };
 }
 
-export function ProductsTable() {
+const PERM_UPDATE = ['product:update', 'inventory.update'];
+const PERM_DELETE = ['product:delete', 'inventory.delete'];
+
+function hasAnyPermission(permissions: string[] | undefined, allowed: string[]): boolean {
+  if (!permissions?.length) return false;
+  return allowed.some((p) => permissions.includes(p));
+}
+
+interface ProductsTableProps {
+  /** Increment to force a refetch (e.g. after bulk import) */
+  refreshTrigger?: number;
+}
+
+export function ProductsTable({ refreshTrigger = 0 }: ProductsTableProps) {
   const searchParams = useSearchParams();
   const filterLowStock = searchParams.get('filter') === 'low-stock';
+  const { data: session } = useSession();
+  const { toast } = useToast();
+  const permissions = (session?.user as { permissions?: string[] })?.permissions ?? [];
+  const canUpdate = hasAnyPermission(permissions, PERM_UPDATE);
+  const canDelete = hasAnyPermission(permissions, PERM_DELETE);
 
   const [data, setData] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +94,12 @@ export function ProductsTable() {
     totalPages: 0,
   });
   const [search, setSearch] = useState('');
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchProducts = async (page: number, limit: number, searchTerm: string) => {
     try {
@@ -104,14 +143,99 @@ export function ProductsTable() {
 
   useEffect(() => {
     fetchProducts(pagination.page, pagination.limit, search);
-  }, [pagination.page, pagination.limit, search, filterLowStock]);
+  }, [pagination.page, pagination.limit, search, filterLowStock, refreshTrigger]);
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
   }, [filterLowStock]);
 
+  const refreshProducts = useCallback(() => {
+    fetchProducts(pagination.page, pagination.limit, search);
+  }, [pagination.page, pagination.limit, search]);
+
+  const handleSingleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      const res = await fetch(`/api/products/${deleteTarget.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 409) {
+          toast({ title: 'Cannot delete', description: json.error ?? 'Product has dependencies.', variant: 'destructive' });
+          return;
+        }
+        toast({ title: 'Error', description: json.error ?? 'Failed to delete product', variant: 'destructive' });
+        return;
+      }
+      toast({ title: 'Success', description: 'Product deleted (archived).' });
+      setDeleteTarget(null);
+      refreshProducts();
+    } catch {
+      toast({ title: 'Error', description: 'Network error. Please try again.', variant: 'destructive' });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    const selectedIds = table.getSelectedRowModel().rows.map((r) => r.original.id);
+    if (selectedIds.length === 0) return;
+    setDeleteLoading(true);
+    try {
+      const res = await fetch('/api/products/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productIds: selectedIds }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 409) {
+          toast({ title: 'Cannot delete', description: json.error ?? 'Some products could not be deleted.', variant: 'destructive' });
+          return;
+        }
+        toast({ title: 'Error', description: json.error ?? 'Failed to delete products', variant: 'destructive' });
+        return;
+      }
+      const count = json.deletedCount ?? selectedIds.length;
+      toast({ title: 'Success', description: `${count} product(s) deleted (archived).` });
+      setRowSelection({});
+      setBulkDeleteOpen(false);
+      refreshProducts();
+    } catch {
+      toast({ title: 'Error', description: 'Network error. Please try again.', variant: 'destructive' });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const columns = useMemo<ColumnDef<Product>[]>(
     () => [
+      ...(canDelete
+        ? [
+            {
+              id: 'select',
+              header: ({ table: t }: { table: { getIsAllPageRowsSelected: () => boolean; getIsSomePageRowsSelected: () => boolean; toggleAllPageRowsSelected: (value: boolean) => void } }) => (
+                <Checkbox
+                  checked={t.getIsAllPageRowsSelected() || (t.getIsSomePageRowsSelected() && 'indeterminate')}
+                  onCheckedChange={(value) => t.toggleAllPageRowsSelected(!!value)}
+                  aria-label="Select all"
+                  className="translate-y-0.5"
+                />
+              ),
+              cell: ({ row }: { row: { getIsSelected: () => boolean; toggleSelected: (value?: boolean) => void } }) => (
+                <Checkbox
+                  checked={row.getIsSelected()}
+                  onCheckedChange={(value) => row.toggleSelected(!!value)}
+                  aria-label="Select row"
+                  className="translate-y-0.5"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ),
+              enableSorting: false,
+              enableHiding: false,
+            } as ColumnDef<Product>,
+          ]
+        : []),
       {
         accessorKey: 'sku',
         header: 'SKU',
@@ -167,8 +291,54 @@ export function ProductsTable() {
           );
         },
       },
+      ...(canUpdate || canDelete
+        ? [
+            {
+              id: 'actions',
+              header: () => <span className="sr-only">Actions</span>,
+              cell: ({ row }: { row: { original: Product } }) => {
+                const product = row.original;
+                return (
+                  <div className="flex items-center gap-1">
+                    {canUpdate && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label={`Edit ${product.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditProduct(product);
+                          setEditOpen(true);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        aria-label={`Delete ${product.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget({ id: product.id, name: product.name });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              },
+              enableSorting: false,
+              enableHiding: false,
+            } as ColumnDef<Product>,
+          ]
+        : []),
     ],
-    []
+    [canUpdate, canDelete]
   );
 
   const table = useReactTable({
@@ -180,13 +350,20 @@ export function ProductsTable() {
     getFilteredRowModel: getFilteredRowModel(),
     manualPagination: true,
     pageCount: pagination.totalPages,
+    getRowId: (row) => row.id,
+    enableRowSelection: canDelete,
     state: {
       pagination: {
         pageIndex: pagination.page - 1,
         pageSize: pagination.limit,
       },
+      rowSelection,
     },
+    onRowSelectionChange: setRowSelection,
   });
+
+  const selectedCount = table.getSelectedRowModel().rows.length;
+  const showBulkDelete = canDelete && selectedCount > 0;
 
   if (loading && data.length === 0) {
     return (
@@ -206,16 +383,27 @@ export function ProductsTable() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Input
-          placeholder="Search products..."
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPagination((prev) => ({ ...prev, page: 1 }));
-          }}
-          className="max-w-sm"
-        />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search products..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPagination((prev) => ({ ...prev, page: 1 }));
+            }}
+            className="max-w-sm"
+          />
+          {showBulkDelete && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              Bulk Delete ({selectedCount})
+            </Button>
+          )}
+        </div>
         <div className="text-sm text-muted-foreground">
           Showing {data.length} of {pagination.total} products
         </div>
@@ -249,7 +437,7 @@ export function ProductsTable() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
+                <TableCell colSpan={table.getAllColumns().length} className="h-24 text-center">
                   No products found.
                 </TableCell>
               </TableRow>
@@ -257,6 +445,79 @@ export function ProductsTable() {
           </TableBody>
         </Table>
       </div>
+
+      <EditProductDialog
+        product={editProduct as ProductForEdit | null}
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) setEditProduct(null);
+        }}
+        onSuccess={() => {
+          refreshProducts();
+        }}
+      />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete product?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>This action cannot be undone.</p>
+                <p className="text-muted-foreground">
+                  Deleting will archive the product. History will remain.
+                </p>
+                {deleteTarget && (
+                  <p className="font-medium">Product: {deleteTarget.name}</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleSingleDeleteConfirm();
+              }}
+              disabled={deleteLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteLoading ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete products?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>You are about to delete {selectedCount} product(s). This action cannot be undone.</p>
+                <p className="text-muted-foreground">
+                  Deleting will archive the products. Stock history will remain.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleBulkDeleteConfirm();
+              }}
+              disabled={deleteLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteLoading ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">

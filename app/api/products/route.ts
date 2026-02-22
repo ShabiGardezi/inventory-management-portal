@@ -142,7 +142,7 @@ export async function GET(request: NextRequest) {
     const filterLowStock = searchParams.get('filter') === 'low-stock';
 
     // Build where clause
-    const where: any = {};
+    const where: Record<string, unknown> = {};
 
     if (filterLowStock) {
       const balances = await prisma.stockBalance.groupBy({
@@ -170,8 +170,11 @@ export async function GET(request: NextRequest) {
       where.category = category;
     }
 
+    // Default to active-only (soft-deleted products excluded) when not specified
     if (isActive !== null && isActive !== undefined) {
       where.isActive = isActive === 'true';
+    } else {
+      where.isActive = true;
     }
 
     // Fetch products with pagination

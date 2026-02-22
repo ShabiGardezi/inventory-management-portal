@@ -157,14 +157,14 @@ export function AddUserDialog({
             <div className="space-y-2">
               <Label>Role (optional)</Label>
               <Select
-                value={roleIds[0] ?? ''}
-                onValueChange={(v) => setRoleIds(v ? [v] : [])}
+                value={roleIds[0] ?? '__none__'}
+                onValueChange={(v) => setRoleIds(v && v !== '__none__' ? [v] : [])}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
                   {roles.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}

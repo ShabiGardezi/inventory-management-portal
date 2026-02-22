@@ -91,3 +91,34 @@ export async function PATCH(
     return createErrorResponse('Failed to update product', 500);
   }
 }
+
+/** Soft delete: set isActive = false so product is excluded from active lists; history remains. */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    await requirePermission('product:delete');
+    const { id } = await params;
+    const product = await prisma.product.findUnique({ where: { id } });
+    if (!product) {
+      return createErrorResponse('Product not found', 404);
+    }
+    await prisma.product.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    return createSuccessResponse({ message: 'Product deleted (archived).' });
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized: Authentication required') {
+        return createErrorResponse('Unauthorized', 401);
+      }
+      if (error.message.includes('Forbidden:')) {
+        return createErrorResponse(error.message, 403);
+      }
+    }
+    console.error('DELETE /api/products/[id] error:', error);
+    return createErrorResponse('Failed to delete product', 500);
+  }
+}
