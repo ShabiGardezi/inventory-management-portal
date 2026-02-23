@@ -94,9 +94,11 @@ function LoginForm() {
             <p className="font-semibold mb-2">Test accounts (password: password123):</p>
             <ul className="space-y-1 text-xs">
               <li>Admin: admin@example.com</li>
-              <li>Manager: manager@example.com · Staff: staff@example.com · Viewer: viewer@example.com</li>
-              <li>Inventory Clerk: inventory_clerk@example.com · Warehouse Lead: warehouse_lead@example.com</li>
-              <li>Procurement: procurement@example.com · Sales Rep: sales_rep@example.com · Reports: reports_only@example.com</li>
+              <li>Manager: manager@example.com</li>
+              <li>Staff: staff1@example.com, staff2@example.com</li>
+              <li>Viewer: viewer@example.com</li>
+              <li>Warehouse Lead: warehouse_lead@example.com</li>
+              <li>Warehouse: warehouse@example.com</li>
             </ul>
           </div>
         </CardContent>
