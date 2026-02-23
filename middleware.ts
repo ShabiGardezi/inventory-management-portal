@@ -12,13 +12,15 @@ export default auth((request: NextAuthRequest) => {
 
   // Public routes that don't require authentication
   // Keep /api/health public so DB connectivity can be checked without auth
-  const publicRoutes = ['/login', '/api/auth', '/api/health'];
+  const publicRoutes = ['/login', '/api/auth', '/api/health', '/api/leads'];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
   const isMarketingRoute =
     pathname === '/' ||
     pathname === '/pricing' ||
     pathname === '/demo' ||
+    pathname === '/contact' ||
+    pathname === '/privacy' ||
     pathname === '/blog' ||
     pathname.startsWith('/blog/') ||
     pathname === '/sitemap.xml' ||
@@ -47,11 +49,13 @@ export default auth((request: NextAuthRequest) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Role-based route protection
+  // Admin route protection (permission-based)
   if (pathname.startsWith('/admin')) {
+    const permissions = session.user?.permissions || [];
     const roles = session.user?.roles || [];
-    if (!roles.includes('admin')) {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+    const canAccessAdmin = roles.includes('admin') || permissions.includes('leads.read') || permissions.includes('leads.update');
+    if (!canAccessAdmin) {
+      return NextResponse.redirect(new URL('/dashboard/access-denied', request.url));
     }
   }
 

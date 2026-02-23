@@ -738,3 +738,47 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+
+// ============================================
+// Marketing Leads (public site)
+// ============================================
+
+enum LeadType {
+  DEMO
+  CONTACT
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+model Lead {
+  id              String     @id @default(cuid())
+  type            LeadType
+  status          LeadStatus @default(NEW)
+
+  name            String
+  email           String
+  phone           String?
+  company         String?
+  country         String
+  companySize     String?
+  message         String
+
+  marketingOptIn   Boolean  @default(false)
+  consentAccepted  Boolean
+
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  pagePath        String
+
+  createdAt       DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([type, status, createdAt])
+  @@map("leads")
+}

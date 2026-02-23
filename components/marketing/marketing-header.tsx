@@ -25,6 +25,12 @@ export function MarketingHeader() {
 
         <div className="flex items-center gap-3">
           <Link
+            href="/contact"
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Contact
+          </Link>
+          <Link
             href={MARKETING_ROUTES.demo}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >

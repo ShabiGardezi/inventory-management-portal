@@ -41,8 +41,18 @@ export function MarketingFooter() {
               </Link>
             </li>
             <li>
+              <Link href="/contact" className="hover:text-foreground">
+                Contact
+              </Link>
+            </li>
+            <li>
               <Link href="/blog" className="hover:text-foreground">
                 Blog
+              </Link>
+            </li>
+            <li>
+              <Link href="/privacy" className="hover:text-foreground">
+                Privacy Policy
               </Link>
             </li>
             <li>

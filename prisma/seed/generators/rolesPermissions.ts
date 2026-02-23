@@ -53,6 +53,10 @@ const PERMISSIONS: Array<{
   { name: 'approvals.read', resource: 'approvals', action: 'read', description: 'View approval requests', module: 'Approvals' },
   { name: 'approvals.review', resource: 'approvals', action: 'review', description: 'Approve or reject approval requests', module: 'Approvals' },
   { name: 'approvals.manage', resource: 'approvals', action: 'manage', description: 'Manage approval policies and cancel requests', module: 'Approvals' },
+
+  // Admin (PII): marketing leads from public site
+  { name: 'leads.read', resource: 'leads', action: 'read', description: 'View marketing leads', module: 'Admin' },
+  { name: 'leads.update', resource: 'leads', action: 'update', description: 'Update marketing leads status', module: 'Admin' },
 ];
 
 export interface PermissionRecord {
@@ -147,7 +151,7 @@ export async function seedRoles(
   // Manager: product, warehouse, stock, inventory, reports, purchase, sales, export, audit, users, roles, settings
   const managerResources = [
     'product', 'warehouse', 'stock', 'inventory', 'reports', 'purchase', 'sales', 'export',
-    'audit', 'users', 'roles', 'settings', 'warehouse', 'approvals',
+    'audit', 'users', 'roles', 'settings', 'warehouse', 'approvals', 'leads',
   ];
   const managerRole = roles.find((r) => r.name === 'manager')!;
   const managerPerms = permissions.filter(
@@ -187,7 +191,9 @@ export async function seedRoles(
 
   // Viewer: all read
   const viewerRole = roles.find((r) => r.name === 'viewer')!;
-  const viewerPerms = permissions.filter((p) => p.action === 'read' || p.name.includes('.read'));
+  const viewerPerms = permissions.filter(
+    (p) => (p.action === 'read' || p.name.includes('.read')) && p.resource !== 'leads'
+  );
   for (const p of viewerPerms) {
     await prisma.rolePermission.upsert({
       where: {
@@ -203,13 +209,14 @@ export async function seedRoles(
     const role = roles.find((r) => r.name === roleName)!;
     const perms = permissions.filter(
       (p) =>
-        p.action === 'read' ||
-        p.name.endsWith('.read') ||
-        (roleName === 'inventory_clerk' && (p.resource === 'product' || p.resource === 'stock')) ||
-        (roleName === 'warehouse_lead' && (p.resource === 'warehouse' || p.resource === 'stock')) ||
-        (roleName === 'procurement' && p.resource === 'purchase') ||
-        (roleName === 'sales_rep' && p.resource === 'sales') ||
-        (roleName === 'reports_only' && (p.module === 'Reports' || p.resource === 'reports'))
+        p.resource !== 'leads' &&
+        (p.action === 'read' ||
+          p.name.endsWith('.read') ||
+          (roleName === 'inventory_clerk' && (p.resource === 'product' || p.resource === 'stock')) ||
+          (roleName === 'warehouse_lead' && (p.resource === 'warehouse' || p.resource === 'stock')) ||
+          (roleName === 'procurement' && p.resource === 'purchase') ||
+          (roleName === 'sales_rep' && p.resource === 'sales') ||
+          (roleName === 'reports_only' && (p.module === 'Reports' || p.resource === 'reports')))
     );
     for (const p of perms.slice(0, 15)) {
       await prisma.rolePermission.upsert({
