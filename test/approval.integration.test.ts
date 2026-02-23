@@ -11,8 +11,21 @@ import {
   disableApprovalPolicy,
 } from './helpers/factories';
 import { runIntegrityChecks } from '@/lib/verify-integrity';
+import { StockService } from '@/server/services/stock.service';
 
-vi.mock('@/auth', () => ({ auth: vi.fn() }));
+type MockAuthSession = {
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    permissions: string[];
+    roles: string[];
+  };
+};
+
+vi.mock('@/auth', () => ({
+  auth: vi.fn<() => Promise<MockAuthSession | null>>(),
+}));
 
 const prisma = createTestPrisma();
 
@@ -29,7 +42,10 @@ async function mockSession(user: {
   roles: string[];
 }) {
   const { auth } = await import('@/auth');
-  vi.mocked(auth).mockResolvedValue({
+  const authMock = auth as unknown as {
+    mockResolvedValue: (value: MockAuthSession | null) => void;
+  };
+  authMock.mockResolvedValue({
     user: {
       id: user.id,
       email: user.email,
@@ -303,6 +319,98 @@ describe('Approval workflow: SALE_CONFIRM', () => {
     const { ok, errors } = await runIntegrityChecks(prisma);
     expect(errors).toEqual([]);
     expect(ok).toBe(true);
+  });
+
+  it('policy enabled: batch/serial inputs are preserved and used during approval execution', async () => {
+    await enableApprovalPolicy(prisma, 'SALE_CONFIRM');
+    const [requester, reviewer, product, warehouse] = await Promise.all([
+      createUserWithPermissions(prisma, ['stock:adjust']),
+      createUserWithPermissions(prisma, ['approvals.review']),
+      createProduct(prisma, undefined, { trackBatches: true, trackSerials: true }),
+      createWarehouse(prisma),
+    ]);
+
+    const stockService = new StockService(prisma);
+    const serialNumbers = ['SN-APP-1', 'SN-APP-2', 'SN-APP-3'];
+    await stockService.receivePurchase({
+      productId: product.id,
+      warehouseId: warehouse.id,
+      quantity: serialNumbers.length,
+      referenceNumber: 'PO-BATCH-SERIAL-SEED',
+      createdById: requester.id,
+      batchInput: { batchNumber: 'BATCH-APP-1' },
+      serialNumbers,
+    });
+    const batch = await prisma.batch.findFirst({
+      where: { productId: product.id, batchNumber: 'BATCH-APP-1' },
+      select: { id: true },
+    });
+    expect(batch?.id).toBeDefined();
+
+    await mockSession(requester);
+    const { POST: postConfirm } = await import('@/app/api/sales/confirm/route');
+    const confirmRes = await postConfirm(
+      new NextRequest('http://localhost/api/sales/confirm', {
+        method: 'POST',
+        body: JSON.stringify({
+          referenceNumber: 'SO-BATCH-SERIAL-APPROVAL-1',
+          items: [
+            {
+              productId: product.id,
+              warehouseId: warehouse.id,
+              quantity: serialNumbers.length,
+              batchId: batch!.id,
+              serialNumbers,
+            },
+          ],
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    expect(confirmRes.status).toBe(202);
+    const confirmBody = await confirmRes.json();
+
+    // Use raw SQL so the test doesn't depend on generated Prisma types for new columns.
+    const saleItems = await prisma.$queryRaw<
+      Array<{ batchId: string | null; serialNumbers: string[] }>
+    >`
+      SELECT "batchId", "serialNumbers"
+      FROM sale_items
+      WHERE "saleId" = ${confirmBody.entityId}
+    `;
+    expect(saleItems.length).toBe(1);
+    expect(saleItems[0]!.batchId).toBe(batch!.id);
+    expect(saleItems[0]!.serialNumbers).toEqual(serialNumbers);
+
+    await mockSession(reviewer);
+    const { POST: postApprove } = await import('@/app/api/approvals/[id]/approve/route');
+    const approveRes = await postApprove(
+      new NextRequest(`http://localhost/api/approvals/${confirmBody.requestId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: confirmBody.requestId }) }
+    );
+    expect(approveRes.status).toBe(200);
+
+    const outMovements = await prisma.stockMovement.findMany({
+      where: { productId: product.id, warehouseId: warehouse.id, referenceType: 'SALE', movementType: 'OUT' },
+      select: { id: true, batchId: true, serialCount: true },
+    });
+    expect(outMovements.length).toBe(1);
+    expect(outMovements[0]!.batchId).toBe(batch!.id);
+    expect(outMovements[0]!.serialCount).toBe(serialNumbers.length);
+
+    const updatedSerials = await prisma.productSerial.findMany({
+      where: { productId: product.id, serialNumber: { in: serialNumbers } },
+      select: { status: true, movementId: true },
+    });
+    expect(updatedSerials).toHaveLength(serialNumbers.length);
+    updatedSerials.forEach((s) => {
+      expect(s.status).toBe('SOLD');
+      expect(s.movementId).toBe(outMovements[0]!.id);
+    });
   });
 });
 

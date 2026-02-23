@@ -249,6 +249,7 @@ model Batch {
   stockBalances    StockBalance[]
   productSerials   ProductSerial[]
   inventoryLayers  InventoryLayer[]
+  saleItems        SaleItem[]
 
   @@unique([productId, batchNumber])
   @@index([productId, expiryDate])
@@ -457,6 +458,8 @@ model SaleItem {
   productId       String
   warehouseId     String
   quantity        Decimal   @db.Decimal(12, 4)
+  batchId         String?   // Optional batch for batch-tracked products
+  serialNumbers   String[]  @default([]) // Serial numbers for serial-tracked products (OUT must supply qty count)
   unitPrice       Decimal?  @db.Decimal(12, 4)
   unitCostAtSale  Decimal?  @db.Decimal(12, 4) // Snapshot at sale for reporting
   cogsTotal       Decimal?  @db.Decimal(12, 4)
@@ -469,9 +472,11 @@ model SaleItem {
   product  Product @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   consumptions InventoryConsumption[]
+  batch    Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([saleId])
   @@index([productId])
+  @@index([batchId])
   @@map("sale_items")
 }
 

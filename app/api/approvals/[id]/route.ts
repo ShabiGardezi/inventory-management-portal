@@ -49,10 +49,20 @@ export async function GET(
         select: { id: true, referenceNumber: true, status: true },
       });
       if (e) {
-        const items = await prisma.saleItem.findMany({
-          where: { saleId: e.id },
-          select: { productId: true, warehouseId: true, quantity: true },
-        });
+        // Use raw SQL so this route doesn't depend on generated Prisma types for new columns.
+        const items = await prisma.$queryRaw<
+          Array<{
+            productId: string;
+            warehouseId: string;
+            quantity: unknown;
+            batchId: string | null;
+            serialNumbers: string[];
+          }>
+        >`
+          SELECT "productId", "warehouseId", quantity, "batchId", "serialNumbers"
+          FROM sale_items
+          WHERE "saleId" = ${e.id}
+        `;
         entitySummary = { referenceNumber: e.referenceNumber, status: e.status, items };
       } else entitySummary = null;
     } else if (req.entityType === 'STOCK_ADJUSTMENT') {

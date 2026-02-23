@@ -222,12 +222,7 @@ export async function approveRequest(
       case 'SALE_CONFIRM': {
         const sale = await tx.sale.findUnique({
           where: { id: request.entityId },
-          select: {
-            id: true,
-            status: true,
-            referenceNumber: true,
-            items: { select: { productId: true, warehouseId: true, quantity: true } },
-          },
+          include: { items: true },
         });
         if (!sale) throw new Error('Sale not found');
         if (sale.status === 'CONFIRMED') {
@@ -235,6 +230,8 @@ export async function approveRequest(
           return;
         }
         for (const item of sale.items) {
+          const batchId = (item as unknown as { batchId?: string | null }).batchId ?? undefined;
+          const serialNumbers = (item as unknown as { serialNumbers?: string[] }).serialNumbers;
           await stockService.confirmSale({
             productId: item.productId,
             warehouseId: item.warehouseId,
@@ -243,6 +240,8 @@ export async function approveRequest(
             referenceId: sale.id,
             createdById: params.reviewerId,
             allowNegative: allowNegativeDefault,
+            batchId,
+            serialNumbers: serialNumbers?.length ? serialNumbers : undefined,
           });
         }
         await tx.sale.update({
