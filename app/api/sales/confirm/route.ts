@@ -56,6 +56,8 @@ export async function POST(request: NextRequest) {
               productId: i.productId,
               warehouseId: i.warehouseId,
               quantity: i.quantity,
+              batchId: i.batchId ?? null,
+              serialNumbers: i.serialNumbers ?? [],
             })),
           },
         },
