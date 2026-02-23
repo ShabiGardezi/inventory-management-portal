@@ -25,21 +25,23 @@ The **Inventory Management Portal** is a business-ready inventory and stock mana
 
 ---
 
-## Module Explanations (System Tabs)
+## Module Explanations (Navigation)
 
-| Tab | Purpose |
+| Nav item | Purpose |
 |-----|---------|
 | **Dashboard** | Role-scoped summary cards, charts (movement trend, sales vs purchases, low stock by category, stock by category, my movements), and preview tables with “View all” links. Supports 7d / 30d / 90d and custom date range. |
 | **Products** | Product catalog (SKU, name, category, unit, price, reorder level). List supports search and `?filter=low-stock`. Create, edit, view product details. |
 | **Warehouses** | Warehouse master (code, name, address). Create, edit, view; warehouse-level stock and movements. |
 | **Stock Movements** | Full list of IN/OUT/TRANSFER/ADJUSTMENT movements with filters (type, date range, warehouse, product, “my actions”). Adjust stock and transfer stock actions from here (permission-gated). |
-| **Purchases** | View OUT movements filtered by type/reference as “purchases” context; receiving stock is done via adjust/receive flows that create IN movements with referenceType PURCHASE. |
-| **Sales** | View OUT movements as “sales”; confirming a sale creates OUT movements with referenceType SALE via `StockService.confirmSale`. |
+| **Purchases** | Purchase/receiving context; receiving stock creates **IN** movements with referenceType PURCHASE via `StockService.receivePurchase`. |
+| **Sales** | Sales context; confirming a sale creates **OUT** movements with referenceType SALE via `StockService.confirmSale` (or via approval execution when policies are enabled). |
 | **Reports** | Overview, Inventory, Movements, Sales, Purchases, Audit tabs with filters (warehouse, category, range). Charts and tables; CSV export where permitted. |
 | **Users** | User list and details; create/invite, edit, disable; assign roles. |
 | **Roles** | Role list; create, edit, assign permissions; assign users to roles. Permission-based (no role-name checks in business logic). |
 | **Audit Logs** | List of audit entries (action, resource, user, date) with filters. |
 | **Settings** | Organization, inventory rules (e.g. allow negative stock, reorder alerts), notifications. Global settings scope (single-tenant). |
+| **Approvals** | Review/approve/reject requests (purchase receive, sale confirm, stock adjust, transfer) when approval policies are enabled. Execution is idempotent and runs through `StockService`. |
+| **Scan (top bar action)** | Barcode/QR lookup to quickly find a product/batch/serial by barcode/SKU/serial; designed for USB scanners or camera-based scanning. Visible when user has `inventory.read` / `inventory:read`. |
 
 ---
 

@@ -59,6 +59,11 @@ Permissions are stored by **name** (e.g. `product:read`). The app checks these n
 - `sales.read` — View sales reports
 - `export.read` — Export reports to CSV
 
+### Scan (barcode/QR lookup)
+
+- **UI**: Scan is a **top navbar button/modal**, not a sidebar tab.
+- **Permission gate**: visible when user has `inventory.read` or `inventory:read` (same as Inventory read).
+
 ---
 
 ## Default Role–Permission Matrix
@@ -106,6 +111,8 @@ The sidebar uses **required permissions per nav item**. A nav item is shown if t
 | Roles | `roles.manage`, `roles.read` |
 | Audit Logs | `audit.read`, `audit:read` |
 | Settings | `settings.read` |
+
+**Scan button (top bar):** `inventory.read`, `inventory:read`
 
 - **Empty** `requiredPermissions` (Dashboard) → item is always visible to any logged-in user.
 - Nested routes (e.g. `/dashboard/products/[id]`) use the same requirement as the parent path (e.g. `/dashboard/products`).

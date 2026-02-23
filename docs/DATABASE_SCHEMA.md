@@ -2,7 +2,10 @@
 
 ## Overview
 
-PostgreSQL via Prisma. Core areas: **RBAC** (users, roles, permissions), **Inventory** (products, warehouses, stock_movements, stock_balances), **Settings**, and **Audit**. There are **no separate Purchase or Sale tables** — purchase and sale events are represented as rows in `stock_movements` with `referenceType` PURCHASE or SALE.
+PostgreSQL via Prisma. Core areas: **RBAC** (users, roles, permissions), **Inventory** (products, warehouses, batches/serials, stock_movements, stock_balances), **Sales**, **Approvals**, **Settings**, and **Audit**.
+
+- **Purchases**: receiving stock is represented by **IN** rows in `stock_movements` (`referenceType = 'PURCHASE'`) and optional request entities for approval flows.
+- **Sales**: sales are stored in `sales` / `sale_items` (for approvals + auditability) and **confirming/executing** a sale creates **OUT** rows in `stock_movements` (`referenceType = 'SALE'`).
 
 ---
 
@@ -68,6 +71,48 @@ stock_balances
 - **stock_movements** — Immutable ledger; every stock change is one (or two for transfer) new row(s). Optional `batchId` and `serialCount` for batch/serial tracking.
 - **stock_balances** — One row per (productId, warehouseId, batchId); `batchId` null = non-batch balance. Updated only by `StockService` when creating movements. `available` = quantity - reserved.
 
+### Sales
+
+```
+sales
+  id (cuid), saleNumber (unique-ish), status (DRAFT|PENDING_APPROVAL|CONFIRMED|REJECTED),
+  customerName (optional), customerEmail (optional), notes (optional),
+  warehouseId (FK warehouses), createdById (FK users, optional),
+  createdAt, updatedAt
+
+sale_items
+  id (cuid), saleId (FK sales), productId (FK products),
+  warehouseId (FK warehouses), quantity (Decimal),
+  batchId (FK batches, optional), serialNumbers (text[]),
+  createdAt, updatedAt
+```
+
+- **sales / sale_items** are the business entity records used by the approval workflow (Phase 4) and reporting. Executing a confirmed sale still writes the immutable stock ledger entries into `stock_movements`.
+
+### Approvals
+
+```
+approval_policies
+  id (cuid), entityType (PURCHASE_RECEIVE|SALE_CONFIRM|STOCK_ADJUSTMENT|STOCK_TRANSFER),
+  enabled, conditions (Json), createdAt, updatedAt
+
+approval_requests
+  id (cuid), entityType, entityId, status (PENDING|APPROVED|REJECTED|CANCELLED),
+  requestedById (FK users), reviewedById (FK users, optional), reviewedAt (optional),
+  comment (optional), createdAt, updatedAt
+
+purchase_receive_requests
+  id (cuid), status (DRAFT|PENDING_APPROVAL|RECEIVED|REJECTED),
+  warehouseId (FK), requestedById (FK users), createdAt, updatedAt
+  (items table omitted here; see Prisma schema for exact naming)
+
+stock_adjustments / stock_transfers
+  id (cuid), status (DRAFT|PENDING_APPROVAL|APPLIED|REJECTED), createdAt, updatedAt
+  (line items omitted here; see Prisma schema)
+```
+
+- Approval execution is idempotent and always mutates stock through `StockService`, producing `stock_movements` + `stock_balances` updates the same as direct execution.
+
 ### Settings (single-tenant)
 
 ```
@@ -79,6 +124,8 @@ settings
   stockAdjustmentReasons[], enableBarcode, quantityPrecision, lowStockThresholdBehavior,
   lowStockNotificationsEnabled, dailySummaryEmailEnabled, weeklySummaryEmailEnabled,
   notificationRecipientEmails[], inAppNotificationsEnabled,
+  valuationMethod, showFinancials,
+  systemLockdown, allowProdWipe,
   createdAt, updatedAt
   @@unique([scope, tenantId])
 
@@ -102,6 +149,7 @@ audit_logs
 - **product_serials**: unique (productId, serialNumber); indexes on (productId, status), (warehouseId, status).
 - **stock_movements**: indexes on productId, warehouseId, movementType, createdAt, referenceNumber, createdById, batchId; composite (warehouseId, createdAt), (productId, createdAt), (movementType, createdAt).
 - **stock_balances**: unique (productId, warehouseId, batchId); indexes on productId, warehouseId, batchId, available.
+- **sale_items**: indexes on (saleId), (productId, warehouseId), (batchId); GIN index recommended for `serialNumbers` if querying by contained serial.
 - **users**: index on email, isActive.
 - **permissions**: index on name, (resource, action), module.
 - **audit_logs**: indexes on userId, action, resource, resourceId, createdAt.
